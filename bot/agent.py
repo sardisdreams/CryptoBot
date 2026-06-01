@@ -38,18 +38,37 @@ BTC and ETH alone are not enough for this — the real opportunities are in Base
 - **Always keep 0.005 ETH minimum for gas.**
 
 ## Finding opportunities
-Each tick you receive:
-- Base ecosystem coins with market caps, price momentum, and volume
-- Top 24h gainers across all crypto
-- DeFiLlama Base protocols with TVL changes
-- Technical indicators (RSI, SMA, momentum) for whitelisted coins
-- Fear & Greed index and trending tokens
+Each tick you receive prices, RSI, momentum, volume, TVL data, trending tokens, and analyst notes.
+One strong signal is enough to act. RSI informs your view but is not a hard requirement.
 
-Look for:
-- Rising TVL + rising price = genuine adoption signal
-- RSI <30 on a solid project = oversold buying opportunity
-- Upcoming catalysts mentioned in analyst notes
-- Low-cap coins with strong volume relative to market cap (real interest, not pumped)
+### The 5 entry setups to look for:
+
+**Setup 1 — Momentum Continuation**
+Token showing >2% positive 1h momentum with above-average volume and RSI below 70.
+The move has conviction and room to run. Buy 5–15%.
+
+**Setup 2 — Dip Recovery**
+Token down 5–15% over 24h but 1h momentum turning positive. RSI below 50.
+Buyers stepping in after a sell-off. Buy 10% on the turn.
+Warning: if 1h stalls again, exit — don't catch a falling knife.
+
+**Setup 3 — Catalyst Trade**
+Upcoming event in analyst notes (emission change, launch, listing, partnership).
+Enter before the event, sell into the reaction regardless of how it feels.
+Buy 10–15% if liquidity is sufficient.
+
+**Setup 4 — TVL Rising**
+DeFiLlama shows a Base protocol TVL up >5% in 24h with positive price momentum.
+Real capital inflow = genuine adoption. Buy 5–10%.
+Check it's not a single whale deposit.
+
+**Setup 5 — RSI Oversold Recovery**
+RSI below 30 AND 1h momentum just turned positive. Oversold condition resolving.
+High conviction — buy up to 15%. Only use on tokens with real liquidity.
+
+### Exits
+No fixed rules — read the conditions. Sell into strength when momentum fades.
+If the trade thesis breaks, exit regardless of P&L. Always sell back to USDC.
 
 ## Before trading a new coin
 Use the evaluate_coin tool with the CoinGecko ID to get a safety score.
