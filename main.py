@@ -1,6 +1,8 @@
 import bot.ssl_fix  # must be first import — patches SSL before any HTTPS calls
 
+import os
 import time
+import certifi
 import schedule
 import requests
 from web3 import Web3

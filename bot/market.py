@@ -125,34 +125,24 @@ class Market:
 
     def get_aerodrome_top_pools(self) -> list[dict]:
         """
-        Fetch top liquidity pools from Aerodrome (Base's main DEX).
-        Shows which tokens have real trading activity on Base specifically.
-        """
-        query = """
-        {
-          pools(first: 10, orderBy: volumeUSD, orderDirection: desc) {
-            token0 { symbol }
-            token1 { symbol }
-            volumeUSD
-            liquidity
-          }
-        }
+        Fetch top liquidity pools from Aerodrome via their public API.
+        Shows which tokens have real trading activity on Base.
         """
         try:
-            resp = requests.post(
-                "https://api.thegraph.com/subgraphs/name/aerodrome-finance/aerodrome-v2",
-                json={"query": query},
+            resp = requests.get(
+                "https://api.aerodrome.finance/api/v1/pools",
+                params={"limit": 20, "sort": "volume"},
                 timeout=10,
                 verify=SSL,
             )
             resp.raise_for_status()
-            pools = resp.json().get("data", {}).get("pools", [])
+            pools = resp.json().get("data", []) or resp.json()
             result = []
-            for p in pools:
-                result.append({
-                    "pair": f"{p['token0']['symbol']}/{p['token1']['symbol']}",
-                    "volume_usd": float(p.get("volumeUSD", 0)),
-                })
+            for p in pools[:10]:
+                token0 = p.get("token0", {}).get("symbol", "?")
+                token1 = p.get("token1", {}).get("symbol", "?")
+                vol = float(p.get("volumeUSD", 0) or p.get("volume24h", 0) or 0)
+                result.append({"pair": f"{token0}/{token1}", "volume_usd": vol})
             logger.info(f"Aerodrome top pools: {[p['pair'] for p in result[:5]]}")
             return result
         except Exception as e:

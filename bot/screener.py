@@ -60,28 +60,40 @@ def get_base_ecosystem_coins(min_market_cap: int = 5_000_000, max_market_cap: in
 
 
 def get_top_gainers(hours: int = 24) -> list[dict]:
-    """Top gaining coins in the last N hours — catch momentum early."""
+    """Top gaining coins in the last 24h using free CoinGecko markets endpoint."""
     try:
         resp = requests.get(
-            COINGECKO_GAINERS,
-            params={"vs_currency": "usd", "duration": f"{hours}h", "top_coins": 500},
+            COINGECKO_MARKETS,
+            params={
+                "vs_currency": "usd",
+                "order": "percent_change_24h_desc" if hours == 24 else "market_cap_desc",
+                "per_page": 50,
+                "price_change_percentage": "1h,24h",
+                "category": "base-ecosystem",
+            },
             timeout=10,
             verify=SSL,
         )
         resp.raise_for_status()
-        data = resp.json()
-        gainers = data.get("top_gainers", [])[:10]
+        coins = sorted(
+            resp.json(),
+            key=lambda c: c.get("price_change_percentage_24h", 0) or 0,
+            reverse=True,
+        )[:10]
         result = []
-        for c in gainers:
+        for c in coins:
+            change = c.get("price_change_percentage_24h", 0) or 0
+            if change < 3:
+                continue  # only show meaningful movers
             result.append({
-                "symbol":    c.get("symbol", "").upper(),
-                "name":      c.get("name"),
-                "change":    c.get("usd_24h_change", 0),
-                "price":     c.get("usd", 0),
-                "volume":    c.get("usd_24h_vol", 0),
-                "cg_id":     c.get("id"),
+                "symbol": c.get("symbol", "").upper(),
+                "name":   c.get("name"),
+                "change": change,
+                "price":  c.get("current_price", 0),
+                "volume": c.get("total_volume", 0),
+                "cg_id":  c.get("id"),
             })
-        logger.info(f"Top gainers ({hours}h): {[c['symbol'] for c in result]}")
+        logger.info(f"Top gainers (24h): {[c['symbol'] for c in result]}")
         return result
     except Exception as e:
         logger.warning(f"Top gainers fetch failed: {e}")
