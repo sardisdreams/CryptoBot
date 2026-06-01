@@ -7,13 +7,18 @@ from dotenv import load_dotenv
 from bot.config import BASE_RPC_URL, validate
 from bot.logger import setup_logger
 from bot.wallet import Wallet
-from bot.dex import DEX
-from bot.strategy import SimpleMAStrategy
+from bot.market import Market
+from bot.portfolio import Portfolio
+from bot.executor import Executor
+from bot.agent import TradingAgent
 
 load_dotenv()
 logger = setup_logger("main")
 
 os.makedirs("logs", exist_ok=True)
+os.makedirs("records", exist_ok=True)
+
+RUN_INTERVAL_SECONDS = 300  # Run agent every 5 minutes
 
 
 def main():
@@ -27,14 +32,15 @@ def main():
     logger.info(f"Connected to Base chain (block {w3.eth.block_number})")
 
     wallet = Wallet(w3)
-    dex = DEX(w3, wallet)
-    strategy = SimpleMAStrategy(w3, wallet, dex)
+    market = Market(w3)
+    portfolio = Portfolio(w3, wallet, market)
+    executor = Executor(w3, wallet)
+    agent = TradingAgent(portfolio, executor)
 
-    logger.info("Bot started — running every 60 seconds")
-    schedule.every(60).seconds.do(strategy.run_once)
+    logger.info(f"Trading agent started — running every {RUN_INTERVAL_SECONDS}s")
+    schedule.every(RUN_INTERVAL_SECONDS).seconds.do(agent.run_once)
 
-    # Run immediately on start
-    strategy.run_once()
+    agent.run_once()
 
     while True:
         schedule.run_pending()
