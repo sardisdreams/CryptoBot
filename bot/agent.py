@@ -448,6 +448,16 @@ class TradingAgent:
         if amount_usd > available_usd * 0.98:
             return f"Insufficient balance: have ${available_usd:.2f} of {token_in_sym}, need ${amount_usd:.2f}"
 
+        # Get token_out price — check prices dict, market_data, and token cache
+        token_out_price = snapshot["prices"].get(token_out_sym, 0)
+        if token_out_price == 0:
+            md = snapshot.get("market_data", {}).get(token_out_sym, {})
+            token_out_price = md.get("price", 0)
+        if token_out_price == 0:
+            cached = token_cache.get(tool_input.get("token_out_address", "").lower() if tool_input.get("token_out_address") else "")
+            if cached:
+                token_out_price = cached.get("price", 0)
+
         tx_hash = self.executor.swap(
             token_in_address=token_in["address"],
             token_in_symbol=token_in_sym,
@@ -457,7 +467,7 @@ class TradingAgent:
             amount_in_wei=amount_wei,
             price_eth_usd=snapshot["prices"].get("WETH", 0),
             token_in_price_usd=price_in,
-            token_out_price_usd=snapshot["prices"].get(token_out_sym, 0),
+            token_out_price_usd=token_out_price,
             take_profit_pct=float(tool_input.get("take_profit_pct", 25.0)),
             stop_loss_pct=float(tool_input.get("stop_loss_pct", 25.0)),
             max_hold_hours=float(tool_input.get("max_hold_hours", 48.0)),

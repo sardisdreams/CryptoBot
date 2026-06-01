@@ -3,6 +3,8 @@ from bot.config import TOKENS, STABLECOINS
 from bot.market import Market
 from bot.wallet import Wallet
 from bot.logger import setup_logger
+from bot import token_cache
+from bot.positions import get_open_positions
 
 logger = setup_logger("portfolio")
 
@@ -61,6 +63,58 @@ class Portfolio:
                 total_usd += value_usd
             except Exception as e:
                 logger.warning(f"Could not fetch balance for {symbol}: {e}")
+
+        # Custom tokens from open positions (not in TOKENS registry)
+        open_pos = get_open_positions()
+        for symbol, lots in open_pos.items():
+            if symbol in holdings or symbol == "ETH":
+                continue
+            # Look up contract address from token cache
+            total_tokens = sum(lot["amount_tokens"] for lot in lots)
+            if total_tokens <= 0:
+                continue
+            # Find cached token info
+            cached_info = None
+            for lot in lots:
+                cg_id = lot.get("cg_id", "")
+                if cg_id:
+                    cached_info = token_cache.get(cg_id)
+                    break
+            if not cached_info:
+                # Try to find by checking all cache entries
+                for cg_id, info in token_cache.list_all().items():
+                    if info.get("name", "").upper() == symbol or cg_id.upper() == symbol:
+                        cached_info = info
+                        break
+            if not cached_info:
+                # Include with unknown price
+                holdings[symbol] = {
+                    "balance": total_tokens,
+                    "price_usd": 0.0,
+                    "value_usd": 0.0,
+                    "address": "",
+                    "decimals": 18,
+                }
+                continue
+            try:
+                contract = self.w3.eth.contract(
+                    address=Web3.to_checksum_address(cached_info["address"]),
+                    abi=ERC20_BALANCE_ABI,
+                )
+                raw = contract.functions.balanceOf(self.wallet.address).call()
+                balance = raw / (10 ** cached_info.get("decimals", 18))
+                price = cached_info.get("price", 0.0)
+                value_usd = balance * price
+                holdings[symbol] = {
+                    "balance": balance,
+                    "price_usd": price,
+                    "value_usd": value_usd,
+                    "address": cached_info["address"],
+                    "decimals": cached_info.get("decimals", 18),
+                }
+                total_usd += value_usd
+            except Exception as e:
+                logger.warning(f"Could not fetch balance for custom token {symbol}: {e}")
 
         # Allocation percentages
         for symbol in holdings:
