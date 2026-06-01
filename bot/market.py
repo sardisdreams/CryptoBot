@@ -20,12 +20,21 @@ COINGECKO_TRENDING = "https://api.coingecko.com/api/v3/search/trending"
 
 SSL = certifi.where()
 
+import time as _time
+
+_MARKET_CACHE: dict = {}
+_MARKET_CACHE_TS: float = 0
+_CACHE_TTL: int = 90  # seconds — reuse data within same tick
+
 
 class Market:
     def __init__(self, w3=None):
         self.w3 = w3
 
     def get_market_data(self) -> dict[str, dict]:
+        global _MARKET_CACHE, _MARKET_CACHE_TS
+        if _MARKET_CACHE and (_time.time() - _MARKET_CACHE_TS) < _CACHE_TTL:
+            return _MARKET_CACHE
         """
         Fetch prices + 1h/24h change % + volume for all whitelisted tokens.
         Uses CoinGecko /coins/markets which returns rich data in one call.
@@ -79,11 +88,13 @@ class Market:
                         f"24h: {d['change_24h']:+.2f}% | "
                         f"vol: ${d['volume_24h']:,.0f}"
                     )
+            _MARKET_CACHE    = result
+            _MARKET_CACHE_TS = _time.time()
             return result
 
         except Exception as e:
             logger.error(f"Market data fetch failed: {e}")
-            return {}
+            return _MARKET_CACHE if _MARKET_CACHE else {}
 
     def get_all_prices(self) -> dict[str, float]:
         data = self.get_market_data()
