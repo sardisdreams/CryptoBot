@@ -2,8 +2,8 @@ import time
 from web3 import Web3
 from bot.config import (
     UNISWAP_V3_ROUTER, UNISWAP_V3_QUOTER,
-    SLIPPAGE_TOLERANCE, SLIPPAGE_TOLERANCE_LOWCAP, HIGH_LIQUIDITY_TOKENS,
-    GAS_LIMIT, BASE_CHAIN_ID, DEFAULT_FEE, WETH_ADDRESS, STABLECOINS,
+    SLIPPAGE_TOLERANCE, SLIPPAGE_TOLERANCE_LOWCAP, SLIPPAGE_MAX, MAX_PRICE_IMPACT,
+    HIGH_LIQUIDITY_TOKENS, GAS_LIMIT, BASE_CHAIN_ID, DEFAULT_FEE, WETH_ADDRESS, STABLECOINS,
 )
 from bot.wallet import Wallet
 from bot.logger import setup_logger
@@ -158,6 +158,25 @@ class Executor:
             logger.warning("Swap skipped: no liquidity on Uniswap V3 or Aerodrome")
             return None
 
+        # Price impact check — protect against near-zero liquidity pools
+        if token_in_price_usd > 0 and token_out_price_usd > 0:
+            amount_in_usd   = (amount_in_wei / 10 ** token_in_decimals) * token_in_price_usd
+            # Infer token_out decimals from amount
+            for dec in [18, 8, 6]:
+                amount_out_tokens = amount_out / (10 ** dec)
+                amount_out_usd    = amount_out_tokens * token_out_price_usd
+                if amount_out_usd > 0.01:
+                    break
+            if amount_in_usd > 0:
+                price_impact = (amount_in_usd - amount_out_usd) / amount_in_usd
+                logger.info(f"Price impact: {price_impact:.1%} (in ${amount_in_usd:.2f} → out ${amount_out_usd:.2f})")
+                if price_impact > MAX_PRICE_IMPACT:
+                    logger.warning(
+                        f"Swap rejected: price impact {price_impact:.1%} exceeds {MAX_PRICE_IMPACT:.0%} max. "
+                        f"Token likely has insufficient liquidity on Base."
+                    )
+                    return None
+
         logger.info(f"Executing on {dex_used}: {amount_in_wei / 10**token_in_decimals:.6f} {token_in_symbol} -> {token_out_symbol}")
 
         # Execute on the DEX that gave us a quote
@@ -173,8 +192,9 @@ class Executor:
             if not is_native_eth:
                 self._ensure_approval(token_in_address, amount_in_wei)
 
-            # Use tighter slippage for liquid tokens, wider for low-cap Base tokens
+            # Use tighter slippage for liquid tokens, wider for low-cap — capped at 5% max
             slip = SLIPPAGE_TOLERANCE if (token_in_symbol in HIGH_LIQUIDITY_TOKENS and token_out_symbol in HIGH_LIQUIDITY_TOKENS) else SLIPPAGE_TOLERANCE_LOWCAP
+            slip = min(slip, SLIPPAGE_MAX)
             min_out   = int(amount_out * (1 - slip))
             deadline  = int(time.time()) + 300
             gas_price = self.w3.eth.gas_price

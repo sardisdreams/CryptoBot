@@ -37,9 +37,11 @@ WETH_ADDRESS = TOKENS["WETH"]["address"]
 USDC_ADDRESS = TOKENS["USDC"]["address"]
 
 # Trading parameters
-SLIPPAGE_TOLERANCE       = float(os.getenv("SLIPPAGE_TOLERANCE", "0.005"))  # major tokens
-SLIPPAGE_TOLERANCE_LOWCAP = 0.02   # 2% for low-liquidity Base-native tokens
-GAS_LIMIT = 300_000
+SLIPPAGE_TOLERANCE        = float(os.getenv("SLIPPAGE_TOLERANCE", "0.005"))  # major tokens (0.5%)
+SLIPPAGE_TOLERANCE_LOWCAP = 0.03   # 3% for low-liquidity Base-native tokens
+SLIPPAGE_MAX              = 0.05   # 5% absolute maximum — never exceed this
+MAX_PRICE_IMPACT          = 0.05   # reject trade if DEX price is >5% worse than market price
+GAS_LIMIT = 400_000                # increased from 300k — some complex swaps need more gas
 
 # High-liquidity tokens that can use tight slippage
 HIGH_LIQUIDITY_TOKENS = {"WETH", "USDC", "USDT", "DAI", "cbBTC", "cbETH"}
