@@ -119,18 +119,21 @@ TOOLS = [
     },
     {
         "name": "execute_swap",
-        "description": "Execute a token swap on Uniswap V3 on Base chain. For known tokens (USDC, WETH, cbBTC, cbETH) just provide the symbol. For any other token, provide the contract_address and decimals from get_token_info.",
+        "description": "Execute a token swap on Base chain. For known tokens (USDC, WETH, cbBTC, cbETH) just provide the symbol. For any other token, provide contract_address and decimals from get_token_info. When buying, always set take_profit_pct and stop_loss_pct.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "token_in":          {"type": "string", "description": "Symbol of token to sell (e.g. USDC, WETH) or 'CUSTOM' for unlisted tokens"},
-                "token_in_address":  {"type": "string", "description": "Contract address — only needed if token_in is not USDC/WETH/cbBTC/cbETH"},
-                "token_in_decimals": {"type": "integer", "description": "Token decimals — only needed if token_in is unlisted"},
-                "token_out":         {"type": "string", "description": "Symbol of token to buy or 'CUSTOM' for unlisted tokens"},
-                "token_out_address": {"type": "string", "description": "Contract address — only needed if token_out is not USDC/WETH/cbBTC/cbETH"},
-                "token_out_decimals":{"type": "integer", "description": "Token decimals — only needed if token_out is unlisted"},
-                "amount_usd":        {"type": "number", "description": "USD value of the trade"},
-                "reasoning":         {"type": "string", "description": "Why you are making this trade"},
+                "token_in":           {"type": "string",  "description": "Symbol of token to sell"},
+                "token_in_address":   {"type": "string",  "description": "Contract address — only needed if token_in is unlisted"},
+                "token_in_decimals":  {"type": "integer", "description": "Decimals — only needed if token_in is unlisted"},
+                "token_out":          {"type": "string",  "description": "Symbol of token to buy"},
+                "token_out_address":  {"type": "string",  "description": "Contract address — only needed if token_out is unlisted"},
+                "token_out_decimals": {"type": "integer", "description": "Decimals — only needed if token_out is unlisted"},
+                "amount_usd":         {"type": "number",  "description": "USD value of the trade"},
+                "take_profit_pct":    {"type": "number",  "description": "Take profit % above entry (e.g. 20 = sell 50% when up 20%). Required when buying."},
+                "stop_loss_pct":      {"type": "number",  "description": "Stop loss % below entry (e.g. 20 = sell all when down 20%). Required when buying."},
+                "max_hold_hours":     {"type": "number",  "description": "Hours before starting to look for exit (default 48). Soft suggestion, not forced."},
+                "reasoning":          {"type": "string",  "description": "Why you are making this trade"},
             },
             "required": ["token_in", "token_out", "amount_usd", "reasoning"],
         },
@@ -179,6 +182,12 @@ class TradingAgent:
             lines.append(f"  {symbol}: ${price:,.4f}")
 
         # Open positions detail
+        time_suggestions = snapshot.get("_time_exit_suggestions", [])
+        if time_suggestions:
+            lines += ["", "Hold window suggestions (soft — use your judgment):"]
+            for s in time_suggestions:
+                lines.append(f"  - {s}")
+
         if open_pos:
             lines += ["", "Open positions (entry price → current P&L):"]
             for p in open_pos:
@@ -433,6 +442,9 @@ class TradingAgent:
             price_eth_usd=snapshot["prices"].get("WETH", 0),
             token_in_price_usd=price_in,
             token_out_price_usd=snapshot["prices"].get(token_out_sym, 0),
+            take_profit_pct=float(tool_input.get("take_profit_pct", 25.0)),
+            stop_loss_pct=float(tool_input.get("stop_loss_pct", 25.0)),
+            max_hold_hours=float(tool_input.get("max_hold_hours", 48.0)),
         )
 
         if tx_hash:
@@ -497,6 +509,37 @@ class TradingAgent:
 
         # Record prices to build up history for technical indicators
         history.record_prices(context["prices"])
+
+        # ── Mechanical exits (TP/SL/time) — run before AI, no reasoning needed ──
+        exits = positions.check_mechanical_exits(context["prices"])
+        for ex in exits:
+            sym     = ex["symbol"]
+            amt     = ex["amount_tokens"]
+            reason  = ex["reason"]
+            urgency = ex["urgency"]
+            logger.info(f"Mechanical exit triggered: {sym} | {reason}")
+
+            # Stop loss and take profit execute immediately
+            if ex["exit_type"] in ("stop_loss", "take_profit"):
+                token_info = TOKENS.get(sym)
+                usdc_info  = TOKENS["USDC"]
+                if token_info:
+                    amount_wei = int(amt * (10 ** token_info["decimals"]))
+                    price = context["prices"].get(sym, 0)
+                    self.executor.swap(
+                        token_in_address=token_info["address"],
+                        token_in_symbol=sym,
+                        token_in_decimals=token_info["decimals"],
+                        token_out_address=usdc_info["address"],
+                        token_out_symbol="USDC",
+                        amount_in_wei=amount_wei,
+                        token_in_price_usd=price,
+                        token_out_price_usd=1.0,
+                    )
+            # Time suggestion — just log it, agent will handle in its reasoning
+            elif ex["exit_type"] == "time_suggestion":
+                snapshot["_time_exit_suggestions"] = snapshot.get("_time_exit_suggestions", [])
+                snapshot["_time_exit_suggestions"].append(reason)
 
         # Discover new opportunities
         screening = get_screening_report()

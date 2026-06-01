@@ -209,9 +209,9 @@ HTML = """
     {% if open_positions %}
     <table>
       <tr>
-        <th>Token</th><th>Amount</th><th>Entry Price</th>
-        <th>Current Price</th><th>Cost Basis</th><th>Current Value</th>
-        <th>P&L ($)</th><th>P&L (%)</th><th>Days Held</th><th>Entry Tx</th>
+        <th>Token</th><th>Amount</th><th>Entry</th><th>Now</th>
+        <th>Cost</th><th>Value</th><th>P&L ($)</th><th>P&L (%)</th>
+        <th>Take Profit</th><th>Stop Loss</th><th>Time Left</th><th>Tx</th>
       </tr>
       {% for p in open_positions %}
       <tr>
@@ -227,7 +227,19 @@ HTML = """
         <td class="{{ 'pos' if p.gain_loss_pct >= 0 else 'neg' }}">
           {{ "%+.2f"|format(p.gain_loss_pct) }}%
         </td>
-        <td>{{ p.hold_days }}</td>
+        <td style="color:#22c55e">
+          {% if p.take_profit_price %}${{ "%.4f"|format(p.take_profit_price) }}
+          <span style="color:#475569">(+{{ p.take_profit_pct }}%)</span>{% else %}—{% endif %}
+        </td>
+        <td style="color:#ef4444">
+          {% if p.stop_loss_price %}${{ "%.4f"|format(p.stop_loss_price) }}
+          <span style="color:#475569">(-{{ p.stop_loss_pct }}%)</span>{% else %}—{% endif %}
+        </td>
+        <td style="{{ 'color:#f59e0b' if p.hours_remaining and p.hours_remaining < 4 else '' }}">
+          {% if p.hours_remaining is not none %}
+            {% if p.hours_remaining < 0 %}Expired{% else %}{{ p.hours_remaining }}h{% endif %}
+          {% else %}—{% endif %}
+        </td>
         <td><a href="https://basescan.org/tx/{{ p.get('entry_tx','') }}"
                target="_blank" class="hash">{{ p.get('entry_tx','')[:10] }}...</a></td>
       </tr>

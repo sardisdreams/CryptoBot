@@ -136,6 +136,9 @@ class Executor:
         price_eth_usd: float = 0.0,
         token_in_price_usd: float = 0.0,
         token_out_price_usd: float = 0.0,
+        take_profit_pct: float = 25.0,
+        stop_loss_pct: float = 25.0,
+        max_hold_hours: float = 48.0,
         fee: int = DEFAULT_FEE,
     ) -> str | None:
         # Try Uniswap V3 first, fall back to Aerodrome
@@ -221,6 +224,9 @@ class Executor:
                         amount_tokens=amount_out_tokens,
                         entry_price_usd=token_out_price_usd,
                         tx_hash=tx_hash,
+                        take_profit_pct=take_profit_pct,
+                        stop_loss_pct=stop_loss_pct,
+                        max_hold_hours=max_hold_hours,
                     )
                     logger.info(f"Position opened: {amount_out_tokens:.6f} {token_out_symbol} @ ${token_out_price_usd:.4f}")
 

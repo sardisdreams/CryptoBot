@@ -56,21 +56,34 @@ def open_position(
     amount_tokens: float,
     entry_price_usd: float,
     tx_hash: str,
+    take_profit_pct: float = 25.0,
+    stop_loss_pct: float = 25.0,
+    max_hold_hours: float = 48.0,
 ) -> str:
-    """Record a new buy. Returns the position ID."""
+    """Record a new buy with TP/SL/time targets. Returns the position ID."""
+    from datetime import timedelta
     positions = _load()
     if symbol not in positions:
         positions[symbol] = []
 
-    position_id = str(uuid.uuid4())[:8]
+    position_id      = str(uuid.uuid4())[:8]
+    take_profit_price = round(entry_price_usd * (1 + take_profit_pct / 100), 6)
+    stop_loss_price   = round(entry_price_usd * (1 - stop_loss_pct  / 100), 6)
+    max_hold_until    = (datetime.now(timezone.utc) + timedelta(hours=max_hold_hours)).isoformat()
+
     positions[symbol].append({
-        "id":              position_id,
-        "symbol":          symbol,
-        "date_opened":     _now(),
-        "entry_price_usd": round(entry_price_usd, 6),
-        "amount_tokens":   amount_tokens,
-        "cost_basis_usd":  round(amount_tokens * entry_price_usd, 4),
-        "entry_tx":        tx_hash,
+        "id":                position_id,
+        "symbol":            symbol,
+        "date_opened":       _now(),
+        "entry_price_usd":   round(entry_price_usd, 6),
+        "amount_tokens":     amount_tokens,
+        "cost_basis_usd":    round(amount_tokens * entry_price_usd, 4),
+        "entry_tx":          tx_hash,
+        "take_profit_price": take_profit_price,
+        "stop_loss_price":   stop_loss_price,
+        "max_hold_until":    max_hold_until,
+        "take_profit_pct":   take_profit_pct,
+        "stop_loss_pct":     stop_loss_pct,
     })
     _save(positions)
     return position_id
@@ -163,6 +176,70 @@ def get_open_positions() -> dict:
     return _load()
 
 
+def check_mechanical_exits(current_prices: dict[str, float]) -> list[dict]:
+    """
+    Check all open positions against TP/SL/time targets.
+    Returns list of exits to execute — caller is responsible for executing swaps.
+    Each item: {symbol, amount_tokens, reason, urgency}
+    """
+    positions = _load()
+    exits = []
+    now = datetime.now(timezone.utc)
+
+    for symbol, lots in positions.items():
+        current_price = current_prices.get(symbol, 0)
+        if current_price == 0:
+            continue
+
+        for lot in lots:
+            tp    = lot.get("take_profit_price")
+            sl    = lot.get("stop_loss_price")
+            until = lot.get("max_hold_until")
+
+            # Stop loss — sell entire lot immediately
+            if sl and current_price <= sl:
+                gain_pct = (current_price - lot["entry_price_usd"]) / lot["entry_price_usd"] * 100
+                exits.append({
+                    "symbol":        symbol,
+                    "amount_tokens": lot["amount_tokens"],
+                    "lot_id":        lot["id"],
+                    "reason":        f"STOP LOSS hit at ${current_price:.4f} ({gain_pct:+.1f}%)",
+                    "urgency":       "immediate",
+                    "exit_type":     "stop_loss",
+                })
+
+            # Take profit — sell 50% of lot
+            elif tp and current_price >= tp:
+                gain_pct = (current_price - lot["entry_price_usd"]) / lot["entry_price_usd"] * 100
+                exits.append({
+                    "symbol":        symbol,
+                    "amount_tokens": lot["amount_tokens"] * 0.5,
+                    "lot_id":        lot["id"],
+                    "reason":        f"TAKE PROFIT hit at ${current_price:.4f} ({gain_pct:+.1f}%)",
+                    "urgency":       "normal",
+                    "exit_type":     "take_profit",
+                })
+
+            # Time window passed — flag for agent to evaluate exit, not forced
+            elif until:
+                try:
+                    expiry = datetime.fromisoformat(until)
+                    if now >= expiry:
+                        gain_pct = (current_price - lot["entry_price_usd"]) / lot["entry_price_usd"] * 100
+                        exits.append({
+                            "symbol":        symbol,
+                            "amount_tokens": lot["amount_tokens"],
+                            "lot_id":        lot["id"],
+                            "reason":        f"HOLD WINDOW EXPIRED — look for exit ({gain_pct:+.1f}%). Not forced.",
+                            "urgency":       "low",
+                            "exit_type":     "time_suggestion",
+                        })
+                except Exception:
+                    pass
+
+    return exits
+
+
 def get_position_summary(current_prices: dict[str, float]) -> list[dict]:
     """Return all open positions with current P&L."""
     positions = _load()
@@ -183,18 +260,34 @@ def get_position_summary(current_prices: dict[str, float]) -> list[dict]:
             date_open = datetime.fromisoformat(lot["date_opened"])
             hold_days = (datetime.now(timezone.utc) - date_open).days
 
+            # Time remaining on max hold
+            until = lot.get("max_hold_until")
+            hours_remaining = None
+            if until:
+                try:
+                    expiry = datetime.fromisoformat(until)
+                    diff = (expiry - datetime.now(timezone.utc)).total_seconds() / 3600
+                    hours_remaining = round(diff, 1)
+                except Exception:
+                    pass
+
             summary.append({
-                "id":             lot["id"],
-                "symbol":         symbol,
-                "date_opened":    lot["date_opened"],
-                "entry_price":    lot["entry_price_usd"],
-                "amount_tokens":  lot["amount_tokens"],
-                "cost_basis_usd": lot["cost_basis_usd"],
-                "current_price":  current_price,
-                "current_value":  round(current_value, 4),
-                "gain_loss_usd":  round(gain_loss, 4),
-                "gain_loss_pct":  round(gain_pct, 2),
-                "hold_days":      hold_days,
+                "id":                lot["id"],
+                "symbol":            symbol,
+                "date_opened":       lot["date_opened"],
+                "entry_price":       lot["entry_price_usd"],
+                "amount_tokens":     lot["amount_tokens"],
+                "cost_basis_usd":    lot["cost_basis_usd"],
+                "current_price":     current_price,
+                "current_value":     round(current_value, 4),
+                "gain_loss_usd":     round(gain_loss, 4),
+                "gain_loss_pct":     round(gain_pct, 2),
+                "hold_days":         hold_days,
+                "take_profit_price": lot.get("take_profit_price"),
+                "stop_loss_price":   lot.get("stop_loss_price"),
+                "hours_remaining":   hours_remaining,
+                "take_profit_pct":   lot.get("take_profit_pct", 25),
+                "stop_loss_pct":     lot.get("stop_loss_pct", 25),
             })
 
     return summary
