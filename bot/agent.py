@@ -6,7 +6,7 @@ from bot.config import ANTHROPIC_API_KEY, TOKENS
 from bot.portfolio import Portfolio
 from bot.executor import Executor
 from bot.logger import setup_logger
-from bot import history, wiki
+from bot import history, wiki, positions
 from bot.screener import get_screening_report
 from bot.evaluator import score_coin, format_report
 
@@ -123,8 +123,15 @@ class TradingAgent:
         )
 
     def _build_market_prompt(self, snapshot: dict) -> str:
+        # Open positions with P&L
+        open_pos = positions.get_position_summary(snapshot.get("prices", {}))
+        realized = positions.get_realized_summary()
+
         lines = [
             f"Total portfolio value: ${snapshot['total_usd']:,.2f}",
+            f"Total realized gains: ${realized['total_realized_gain_usd']:+,.2f} "
+            f"(short-term: ${realized['short_term_gain_usd']:+,.2f} | "
+            f"long-term: ${realized['long_term_gain_usd']:+,.2f})",
             "",
             "Current holdings:",
         ]
@@ -139,6 +146,25 @@ class TradingAgent:
         lines += ["", "Current market prices (USD):"]
         for symbol, price in snapshot["prices"].items():
             lines.append(f"  {symbol}: ${price:,.4f}")
+
+        # Open positions detail
+        if open_pos:
+            lines += ["", "Open positions (entry price → current P&L):"]
+            for p in open_pos:
+                lines.append(
+                    f"  {p['symbol']}: {p['amount_tokens']:.6f} tokens | "
+                    f"entry ${p['entry_price']:,.4f} | now ${p['current_price']:,.4f} | "
+                    f"P&L ${p['gain_loss_usd']:+,.2f} ({p['gain_loss_pct']:+.2f}%) | "
+                    f"held {p['hold_days']}d"
+                )
+                if p['gain_loss_pct'] <= -25:
+                    lines.append(f"    ⚠️  STOP-LOSS TRIGGERED — down {p['gain_loss_pct']:.1f}%, consider exiting")
+                elif p['gain_loss_pct'] >= 60:
+                    lines.append(f"    🎯 TAKE PROFIT L3 — up {p['gain_loss_pct']:.1f}%, consider selling 25%")
+                elif p['gain_loss_pct'] >= 40:
+                    lines.append(f"    🎯 TAKE PROFIT L2 — up {p['gain_loss_pct']:.1f}%, consider selling 25%")
+                elif p['gain_loss_pct'] >= 20:
+                    lines.append(f"    🎯 TAKE PROFIT L1 — up {p['gain_loss_pct']:.1f}%, consider selling 25%")
 
         fg = snapshot.get("fear_and_greed", {})
         lines += [
@@ -296,6 +322,8 @@ class TradingAgent:
             token_out_symbol=token_out_sym,
             amount_in_wei=amount_wei,
             price_eth_usd=snapshot["prices"].get("WETH", 0),
+            token_in_price_usd=price_in,
+            token_out_price_usd=snapshot["prices"].get(token_out_sym, 0),
         )
 
         if tx_hash:

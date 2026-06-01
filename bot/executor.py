@@ -6,7 +6,8 @@ from bot.config import (
 )
 from bot.wallet import Wallet
 from bot.logger import setup_logger
-from bot import recorder
+from bot import recorder, positions
+from bot.config import STABLECOINS
 
 logger = setup_logger("executor")
 
@@ -124,6 +125,8 @@ class Executor:
         token_out_symbol: str,
         amount_in_wei: int,
         price_eth_usd: float = 0.0,
+        token_in_price_usd: float = 0.0,
+        token_out_price_usd: float = 0.0,
         fee: int = DEFAULT_FEE,
     ) -> str | None:
         amount_out = self.get_quote(token_in_address, token_out_address, amount_in_wei, fee)
@@ -175,6 +178,36 @@ class Executor:
             receipt = self.wallet.wait_for_receipt(tx_hash)
             status = "success" if receipt["status"] == 1 else "failed"
             recorder.update_status(tx_hash, status, gas_used=receipt["gasUsed"])
+
+            if status == "success":
+                amount_in_tokens = amount_in_wei / 10 ** token_in_decimals
+                amount_out_tokens = amount_out / 10 ** 6 if token_out_symbol in STABLECOINS else amount_out / 10 ** 18
+
+                # Buying a non-stable token → open position
+                if token_in_symbol in STABLECOINS and token_out_symbol not in STABLECOINS:
+                    positions.open_position(
+                        symbol=token_out_symbol,
+                        amount_tokens=amount_out_tokens,
+                        entry_price_usd=token_out_price_usd,
+                        tx_hash=tx_hash,
+                    )
+                    logger.info(f"Position opened: {amount_out_tokens:.6f} {token_out_symbol} @ ${token_out_price_usd:.4f}")
+
+                # Selling a non-stable token → close position (FIFO)
+                elif token_in_symbol not in STABLECOINS and token_out_symbol in STABLECOINS:
+                    realized = positions.close_position(
+                        symbol=token_in_symbol,
+                        amount_tokens=amount_in_tokens,
+                        exit_price_usd=token_in_price_usd,
+                        exit_tx=tx_hash,
+                    )
+                    for r in realized:
+                        logger.info(
+                            f"Position closed: {r['amount_tokens']:.6f} {token_in_symbol} | "
+                            f"P&L: ${r['gain_loss_usd']:+.2f} ({r['gain_loss_pct']:+.2f}%) | "
+                            f"Held {r['hold_days']} days ({r['term']}-term)"
+                        )
+
         except Exception as e:
             logger.warning(f"Could not confirm receipt for {tx_hash}: {e}")
             recorder.update_status(tx_hash, "unknown")
