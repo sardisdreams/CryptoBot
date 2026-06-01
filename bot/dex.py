@@ -5,6 +5,7 @@ from bot.config import (
 )
 from bot.wallet import Wallet
 from bot.logger import setup_logger
+from bot import recorder
 import time
 
 logger = setup_logger("dex")
@@ -114,4 +115,25 @@ class DEX:
         })
 
         logger.info(f"Swapping {amount_in_wei} of {token_in} → {token_out} (min out: {min_out})")
-        return self.wallet.sign_and_send(tx)
+        tx_hash = self.wallet.sign_and_send(tx)
+
+        gas_price_gwei = self.w3.from_wei(gas_price, "gwei")
+        recorder.record_transaction(
+            tx_hash=tx_hash,
+            token_in=token_in,
+            amount_in=amount_in_wei / 1e18,
+            token_out=token_out,
+            amount_out=amount_out,
+            gas_price_gwei=float(gas_price_gwei),
+            status="pending",
+        )
+
+        try:
+            receipt = self.wallet.wait_for_receipt(tx_hash)
+            status = "success" if receipt["status"] == 1 else "failed"
+            recorder.update_status(tx_hash, status, gas_used=receipt["gasUsed"])
+        except Exception as e:
+            logger.warning(f"Could not confirm receipt for {tx_hash}: {e}")
+            recorder.update_status(tx_hash, "unknown")
+
+        return tx_hash
