@@ -2,7 +2,7 @@ import os
 import httpx
 import certifi
 import anthropic
-from bot.config import ANTHROPIC_API_KEY, TOKENS, MAX_DEPLOY_USD, MIN_TRADE_USD, MAX_TRADE_USD
+from bot.config import ANTHROPIC_API_KEY, TOKENS, MAX_DEPLOY_USD, MIN_TRADE_USD, MAX_TRADE_USD, SWING_TARGETS
 from bot.portfolio import Portfolio
 from bot.executor import Executor
 from bot.logger import setup_logger
@@ -82,6 +82,21 @@ High conviction — buy up to 15%. Only use on tokens with real liquidity.
 ### Exits
 No fixed rules — read the conditions. Sell into strength when momentum fades.
 If the trade thesis breaks, exit regardless of P&L. Always sell back to USDC.
+
+## Swing trading targets
+Some coins are designated swing trade targets — buy low, sell quickly at +8%, sit in USDC, buy back on the next dip. Repeat.
+For these coins use TIGHT parameters: take_profit_pct=8, stop_loss_pct=8, max_hold_hours=18.
+Do NOT hold these waiting for a 20-25% gain — the edge is fast turnover, not big single moves.
+
+Current swing targets:
+""" + "\n".join(
+    f"- {sym}: {info['description']} | week range ${info['weekly_range_low']}–${info['weekly_range_high']} | "
+    f"TP +{info['take_profit_pct']}% SL -{info['stop_loss_pct']}% hold {info['max_hold_hours']}h"
+    for sym, info in SWING_TARGETS.items()
+) + """
+
+Buy swing targets when price is near the weekly low or RSI is oversold.
+Sell immediately at TP — do not hold through the range hoping for more.
 
 ## Trading any coin
 You can trade ANY token on Base — no whitelist. Use get_token_info to look up a coin's

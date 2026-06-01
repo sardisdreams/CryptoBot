@@ -2,11 +2,11 @@
 symbol: VVV
 name: Venice Token
 chain: Base
-contract: TBC — verify on Basescan before adding to whitelist
+contract: "0xacfE6019Ed1A7Dc6f7B508C02d1b04ec88cC21bf"
 decimals: 18
 type: DeFi / AI Protocol Token
-risk: High
-status: WATCHLIST — not yet in trading whitelist
+risk: Medium
+status: ACTIVE — swing trade target
 ---
 
 # Venice Token (VVV)

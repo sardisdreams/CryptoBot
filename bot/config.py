@@ -46,6 +46,21 @@ GAS_LIMIT = 400_000                # increased from 300k — some complex swaps 
 # High-liquidity tokens that can use tight slippage
 HIGH_LIQUIDITY_TOKENS = {"WETH", "USDC", "USDT", "DAI", "cbBTC", "cbETH"}
 
+# Swing trading targets — volatile coins with tight TP/SL for quick in/out
+SWING_TARGETS = {
+    "VVV": {
+        "cg_id":          "venice-token",
+        "address":        "0xacfE6019Ed1A7Dc6f7B508C02d1b04ec88cC21bf",
+        "decimals":       18,
+        "take_profit_pct": 8.0,   # sell quickly at +8%
+        "stop_loss_pct":   8.0,   # cut fast at -8%
+        "max_hold_hours":  18.0,  # don't hold overnight if no move
+        "description":    "Base-native AI privacy platform. High volatility — 7d range $14-20. Swing trade only.",
+        "weekly_range_low":  14.68,
+        "weekly_range_high": 19.93,
+    },
+}
+
 # Capital deployment limits
 MAX_DEPLOY_USD = 200.0    # never deploy more than this total across all open positions
 MIN_TRADE_USD  = 20.0     # minimum trade size (below this, gas isn't worth it)

@@ -2,6 +2,5 @@
 # Add any upcoming events, news, or observations here.
 # The agent reads this file every tick.
 # Lines starting with # are ignored.
-# Example:
-#   VVV reducing emissions tomorrow — potential buy opportunity
-#   ETH ETF decision expected Friday
+
+VVV (Venice Token) is a designated swing trade target. 7-day range $14.68-$19.93. Currently ~$18.87. Buy near weekly low ($14-16), sell at +8%, repeat. Emissions reduction started June 1. Use TP=8%, SL=8%, hold max 18h. CoinGecko ID: venice-token, Base contract: 0xacfE6019Ed1A7Dc6f7B508C02d1b04ec88cC21bf
