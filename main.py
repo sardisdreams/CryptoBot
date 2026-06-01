@@ -15,6 +15,7 @@ from bot.market import Market
 from bot.portfolio import Portfolio
 from bot.executor import Executor
 from bot.agent import TradingAgent
+from bot.performance import get_tier
 
 load_dotenv()
 logger = setup_logger("main")
@@ -22,7 +23,7 @@ logger = setup_logger("main")
 os.makedirs("logs", exist_ok=True)
 os.makedirs("records", exist_ok=True)
 
-RUN_INTERVAL_SECONDS = 3600  # 60 minutes — cost-saving mode (change to 1800 once profitable)
+DEFAULT_INTERVAL = 3600  # fallback interval in seconds
 
 
 def main():
@@ -43,10 +44,28 @@ def main():
     executor = Executor(w3, wallet)
     agent = TradingAgent(portfolio, executor)
 
-    logger.info(f"Trading agent started — running every {RUN_INTERVAL_SECONDS}s")
-    schedule.every(RUN_INTERVAL_SECONDS).seconds.do(agent.run_once)
+    logger.info("Trading agent started — interval adapts to performance")
 
+    def run_and_reschedule():
+        """Run one agent tick, then reschedule based on current performance tier."""
+        market = Market()
+        prices = market.get_all_prices()
+        tier   = get_tier(prices)
+
+        agent.current_tier = tier  # pass to agent for dynamic thresholds
+        agent.run_once()
+
+        # Reschedule at the tier's recommended interval
+        schedule.clear()
+        schedule.every(tier["interval_seconds"]).seconds.do(run_and_reschedule)
+        logger.info(f"Next tick in {tier['interval_seconds']//60}min (tier: {tier['label']})")
+
+    # First run
+    tier = get_tier(Market().get_all_prices())
+    agent.current_tier = tier
     agent.run_once()
+
+    schedule.every(tier["interval_seconds"]).seconds.do(run_and_reschedule)
 
     while True:
         schedule.run_pending()

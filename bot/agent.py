@@ -160,8 +160,9 @@ TOOLS = [
 
 class TradingAgent:
     def __init__(self, portfolio: Portfolio, executor: Executor):
-        self.portfolio = portfolio
-        self.executor = executor
+        self.portfolio    = portfolio
+        self.executor     = executor
+        self.current_tier = {"sonnet_threshold": 5.0, "always_sonnet": False, "label": "CONSERVE"}
         self.client = anthropic.Anthropic(
             api_key=ANTHROPIC_API_KEY,
             http_client=httpx.Client(verify=certifi.where()),
@@ -174,9 +175,11 @@ class TradingAgent:
 
         currently_deployed = sum(p["current_value"] for p in open_pos)
         deploy_remaining = max(0, MAX_DEPLOY_USD - currently_deployed)
+        tier = self.current_tier
 
         lines = [
             f"Total portfolio value: ${snapshot['total_usd']:,.2f}",
+            f"Performance tier: {tier.get('label','?')} | Total P&L: ${tier.get('total_pnl',0):+.2f}",
             f"Deployment cap: ${currently_deployed:.2f} deployed of ${MAX_DEPLOY_USD:.0f} max "
             f"(${deploy_remaining:.2f} available to deploy)",
             f"Trade size limits: ${MIN_TRADE_USD:.0f}–${MAX_TRADE_USD:.0f} per trade",
@@ -506,16 +509,25 @@ class TradingAgent:
             logger.info("Market active: extreme Fear/Greed")
             return True
 
-        # Escalate if any whitelisted coin moved >5% in 1h (raised from 3%)
+        # Use dynamic threshold from performance tier
+        threshold = self.current_tier.get("sonnet_threshold", 5.0)
+
+        # Always use Sonnet if tier says so (high profit mode)
+        if self.current_tier.get("always_sonnet"):
+            logger.info(f"Market active: always_sonnet tier ({self.current_tier.get('label')})")
+            return True
+
+        # Escalate if any whitelisted coin moved > threshold in 1h
         for sym, d in market_data.items():
-            if abs(d.get("change_1h", 0)) >= 5:
-                logger.info(f"Market active: {sym} moved {d['change_1h']:+.1f}% in 1h")
+            if abs(d.get("change_1h", 0)) >= threshold:
+                logger.info(f"Market active: {sym} moved {d['change_1h']:+.1f}% in 1h (threshold {threshold}%)")
                 return True
 
-        # Escalate if screener found meaningful gainers (>8% in 24h)
+        # Escalate if screener found meaningful gainers
+        gainer_threshold = threshold * 2
         for coin in snapshot.get("top_gainers", []):
             chg = coin.get("change_24h", coin.get("change", 0))
-            if abs(chg) >= 8:
+            if abs(chg) >= gainer_threshold:
                 logger.info(f"Market active: screener found {coin['symbol']} {chg:+.1f}%")
                 return True
 
