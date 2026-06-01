@@ -325,7 +325,7 @@ class TradingAgent:
         messages = [{"role": "user", "content": market_context}]
 
         response = self.client.messages.create(
-            model="claude-opus-4-8",
+            model="claude-sonnet-4-6",
             max_tokens=4096,
             system=SYSTEM_PROMPT,
             tools=TOOLS,
@@ -349,7 +349,7 @@ class TradingAgent:
             messages.append({"role": "user", "content": tool_results})
 
             response = self.client.messages.create(
-                model="claude-opus-4-8",
+                model="claude-sonnet-4-6",
                 max_tokens=4096,
                 system=SYSTEM_PROMPT,
                 tools=TOOLS,
