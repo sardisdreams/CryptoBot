@@ -36,70 +36,91 @@ HTML = """
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
          background: #0f1117; color: #e2e8f0; min-height: 100vh; }
   .header { background: #1a1d2e; border-bottom: 1px solid #2d3748;
-            padding: 16px 32px; display: flex; align-items: center; gap: 16px; }
+            padding: 16px 32px; display: flex; align-items: center; gap: 12px; }
   .header h1 { font-size: 1.3rem; font-weight: 700; color: #fff; }
   .badge { background: #22c55e22; color: #22c55e; border: 1px solid #22c55e44;
            padding: 3px 10px; border-radius: 20px; font-size: 0.72rem; font-weight: 600; }
+  .ver { background: #6366f122; color: #818cf8; border: 1px solid #6366f144;
+         padding: 3px 10px; border-radius: 20px; font-size: 0.72rem; font-weight: 600; }
+  /* Tabs */
+  .tabs { display: flex; gap: 0; border-bottom: 1px solid #2d3748;
+          background: #1a1d2e; padding: 0 32px; }
+  .tab  { padding: 12px 20px; font-size: 0.82rem; font-weight: 600; color: #64748b;
+          cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.15s; }
+  .tab:hover { color: #94a3b8; }
+  .tab.active { color: #e2e8f0; border-bottom-color: #6366f1; }
+  .tab-content { display: none; }
+  .tab-content.active { display: block; }
   .container { max-width: 1500px; margin: 0 auto; padding: 20px 32px; }
-  .row-label { font-size: 0.7rem; font-weight: 700; color: #475569; text-transform: uppercase;
-               letter-spacing: 0.08em; margin: 20px 0 10px; }
-  .grid { display: grid; gap: 12px; margin-bottom: 4px; }
-  .grid-holdings { grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }
-  .grid-pnl      { grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
-  .card { background: #1a1d2e; border: 1px solid #2d3748; border-radius: 10px; padding: 16px 18px; }
-  .card.big { border-color: #3d4a6b; }
-  .card .label { font-size: 0.7rem; color: #64748b; text-transform: uppercase;
-                 letter-spacing: 0.05em; margin-bottom: 6px; }
-  .card .value { font-size: 1.5rem; font-weight: 700; color: #fff; line-height: 1.2; }
-  .card .value.sm { font-size: 1.1rem; }
-  .card .sub  { font-size: 0.75rem; color: #64748b; margin-top: 4px; }
-  .card .sub2 { font-size: 0.7rem;  color: #475569; margin-top: 2px; }
+  .row-label { font-size: 0.68rem; font-weight: 700; color: #475569; text-transform: uppercase;
+               letter-spacing: 0.08em; margin: 18px 0 8px; }
+  .grid { display: grid; gap: 10px; margin-bottom: 4px; }
+  .grid-top  { grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); }
+  .grid-pnl  { grid-template-columns: repeat(auto-fill, minmax(155px, 1fr)); }
+  .grid-pos  { grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); }
+  .card { background: #1a1d2e; border: 1px solid #2d3748; border-radius: 10px; padding: 14px 16px; }
+  .card .label { font-size: 0.68rem; color: #64748b; text-transform: uppercase;
+                 letter-spacing: 0.05em; margin-bottom: 5px; }
+  .card .value { font-size: 1.4rem; font-weight: 700; color: #fff; line-height: 1.2; }
+  .card .value.sm { font-size: 1.05rem; }
+  .card .sub  { font-size: 0.72rem; color: #64748b; margin-top: 3px; }
+  .card .sub2 { font-size: 0.68rem; color: #475569; margin-top: 2px; }
   .pos { color: #22c55e; }
   .neg { color: #ef4444; }
   .warn{ color: #f59e0b; }
   .section { background: #1a1d2e; border: 1px solid #2d3748; border-radius: 10px;
-             padding: 18px 20px; margin-bottom: 16px; }
-  .section h2 { font-size: 0.8rem; font-weight: 700; color: #94a3b8;
-                text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 14px; }
-  table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
-  th { text-align: left; padding: 8px 10px; color: #475569; font-weight: 600;
-       font-size: 0.7rem; text-transform: uppercase; border-bottom: 1px solid #2d3748; }
-  td { padding: 10px 10px; border-bottom: 1px solid #1a1d2e; color: #e2e8f0; vertical-align: top; }
+             padding: 16px 18px; margin-bottom: 14px; }
+  .section h2 { font-size: 0.78rem; font-weight: 700; color: #94a3b8;
+                text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 12px; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+  th { text-align: left; padding: 7px 9px; color: #475569; font-weight: 600;
+       font-size: 0.68rem; text-transform: uppercase; border-bottom: 1px solid #2d3748; }
+  td { padding: 9px 9px; border-bottom: 1px solid #161824; color: #e2e8f0; vertical-align: top; }
   tr:last-child td { border-bottom: none; }
   tr:hover td { background: #1e2235; }
-  .pill { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 0.7rem; font-weight: 600; }
+  .pill { display: inline-block; padding: 2px 7px; border-radius: 9px; font-size: 0.68rem; font-weight: 600; }
   .pill.success { background: #22c55e22; color: #22c55e; }
   .pill.failed  { background: #ef444422; color: #ef4444; }
   .pill.short   { background: #f59e0b22; color: #f59e0b; }
   .pill.long    { background: #6366f122; color: #818cf8; }
-  .hash { font-family: monospace; font-size: 0.72rem; color: #475569; }
-  .empty { color: #475569; text-align: center; padding: 24px; font-size: 0.82rem; }
-  .refresh { font-size: 0.68rem; color: #475569; margin-left: auto; }
-  .tag-tp  { color: #22c55e; font-size: 0.72rem; }
-  .tag-sl  { color: #ef4444; font-size: 0.72rem; }
-  .tag-unk { color: #475569; font-size: 0.72rem; }
+  .hash { font-family: monospace; font-size: 0.7rem; color: #475569; }
+  .empty { color: #475569; text-align: center; padding: 20px; font-size: 0.8rem; }
+  .refresh { font-size: 0.66rem; color: #475569; margin-left: auto; }
+  .tag-tp  { color: #22c55e; font-size: 0.7rem; }
+  .tag-sl  { color: #ef4444; font-size: 0.7rem; }
+  .tag-unk { color: #475569; font-size: 0.7rem; }
+  a.cglink { color: #94a3b8; text-decoration: none; font-weight: 600; }
+  a.cglink:hover { color: #e2e8f0; text-decoration: underline; }
 </style>
 </head>
 <body>
 <div class="header">
   <h1>CryptoBot</h1>
   <span class="badge">LIVE</span>
-  <span style="background:#6366f122;color:#818cf8;border:1px solid #6366f144;padding:3px 10px;border-radius:20px;font-size:0.72rem;font-weight:600">v2.01</span>
+  <span class="ver">v2.02</span>
   <span class="refresh">Auto-refreshes every 60s &nbsp;|&nbsp; {{ stats.wallet_address[:8] }}...{{ stats.wallet_address[-6:] }}</span>
 </div>
+
+<!-- TABS -->
+<div class="tabs">
+  <div class="tab active" onclick="showTab('portfolio')">Portfolio</div>
+  <div class="tab" onclick="showTab('watchlist')">Agent Watchlist</div>
+  <div class="tab" onclick="showTab('history')">Trade History</div>
+</div>
+
+<!-- TAB: PORTFOLIO -->
+<div id="tab-portfolio" class="tab-content active">
 <div class="container">
 
-  <!-- ROW 1: WHAT I HOLD -->
-  <div class="row-label">What I Hold</div>
-  <div class="grid grid-holdings">
-
-    <div class="card big">
+  <!-- ROW 1: SUMMARY -->
+  <div class="row-label">Summary</div>
+  <div class="grid grid-top">
+    <div class="card">
       <div class="label">Total Portfolio</div>
       <div class="value">${{ "%.2f"|format(stats.portfolio_usd) }}</div>
-      <div class="sub">Deployed: ${{ "%.2f"|format(stats.deployed_usd) }} &nbsp;|&nbsp; Available: ${{ "%.2f"|format(stats.portfolio_usd - stats.deployed_usd) }}</div>
+      <div class="sub">Deployed: ${{ "%.2f"|format(stats.deployed_usd) }}</div>
       <div class="sub2">{{ stats.open_positions }} open position{{ 's' if stats.open_positions != 1 else '' }}</div>
     </div>
-
     <div class="card">
       <div class="label">USDC Reserve</div>
       <div class="value sm {{ 'warn' if stats.usdc_pct < 30 else '' }}">
@@ -108,7 +129,6 @@ HTML = """
       <div class="sub">{{ "%.1f"|format(stats.usdc_pct) }}% of portfolio</div>
       <div class="sub2">{{ "%.2f"|format(stats.usdc_balance) }} USDC{{ ' — LOW' if stats.usdc_pct < 30 else '' }}</div>
     </div>
-
     <div class="card">
       <div class="label">ETH (Gas)</div>
       <div class="value sm {{ 'warn' if stats.eth_balance < 0.005 else '' }}">
@@ -117,18 +137,68 @@ HTML = """
       <div class="sub">${{ "%.2f"|format(stats.eth_balance * stats.eth_price) }}</div>
       <div class="sub2">{{ 'LOW — top up' if stats.eth_balance < 0.005 else 'Base network' }}</div>
     </div>
+  </div>
 
+  <!-- ROW 2: P&L & TAXES -->
+  <div class="row-label">Profit, Loss &amp; Taxes</div>
+  <div class="grid grid-pnl">
+    <div class="card">
+      <div class="label">Unrealized P&L</div>
+      <div class="value {{ 'pos' if stats.unrealized_gain >= 0 else 'neg' }}">
+        ${{ "%+.2f"|format(stats.unrealized_gain) }}
+      </div>
+      <div class="sub">Open positions</div>
+    </div>
+    <div class="card">
+      <div class="label">Realized P&L</div>
+      <div class="value {{ 'pos' if stats.realized_gain >= 0 else 'neg' }}">
+        ${{ "%+.2f"|format(stats.realized_gain) }}
+      </div>
+      <div class="sub">{{ stats.total_trades }} closed trades</div>
+    </div>
+    <div class="card">
+      <div class="label">Total P&L</div>
+      <div class="value {{ 'pos' if (stats.unrealized_gain + stats.realized_gain) >= 0 else 'neg' }}">
+        ${{ "%+.2f"|format(stats.unrealized_gain + stats.realized_gain) }}
+      </div>
+      <div class="sub">Realized + unrealized</div>
+    </div>
+    <div class="card">
+      <div class="label">Short-term Gains</div>
+      <div class="value sm {{ 'pos' if stats.short_term >= 0 else 'neg' }}">
+        ${{ "%+.2f"|format(stats.short_term) }}
+      </div>
+      <div class="sub">Tax: ordinary income</div>
+    </div>
+    <div class="card">
+      <div class="label">Long-term Gains</div>
+      <div class="value sm {{ 'pos' if stats.long_term >= 0 else 'neg' }}">
+        ${{ "%+.2f"|format(stats.long_term) }}
+      </div>
+      <div class="sub">Tax: capital gains rate</div>
+    </div>
+    <div class="card">
+      <div class="label">Gas Fees Paid</div>
+      <div class="value sm">${{ "%.2f"|format(stats.total_gas_usd) }}</div>
+      <div class="sub">{{ stats.total_txns }} transactions</div>
+    </div>
+  </div>
+
+  <!-- ROW 3: POSITIONS I OWN -->
+  <div class="row-label">Positions I Own</div>
+  <div class="grid grid-pos">
     {% for p in open_positions %}
     <div class="card">
-      <div class="label">{{ p.symbol }}
-        <span style="font-size:0.65rem;margin-left:4px;color:#475569">{{ p.amount_tokens|round(4) }} tokens</span>
+      <div class="label">
+        {% if p.cg_url %}<a href="{{ p.cg_url }}" target="_blank" class="cglink">{{ p.symbol }}</a>
+        {% else %}{{ p.symbol }}{% endif %}
+        <span style="font-size:0.62rem;color:#475569;margin-left:4px">{{ "%.4f"|format(p.amount_tokens) }}</span>
       </div>
       <div class="value sm {{ 'pos' if p.gain_loss_pct >= 0 else 'neg' }}">
-        {% if p.current_value > 0 %} ${{ "%.2f"|format(p.current_value) }}
-        {% else %} ${{ "%.2f"|format(p.cost_basis_usd) }} {% endif %}
+        ${{ "%.2f"|format(p.current_value if p.current_value > 0 else p.cost_basis_usd) }}
       </div>
       <div class="sub {{ 'pos' if p.gain_loss_pct >= 0 else 'neg' }}">
-        {% if p.gain_loss_pct != 0 %}{{ "%+.2f"|format(p.gain_loss_pct) }}% (${{ "%+.2f"|format(p.gain_loss_usd) }})
+        {% if p.cost_basis_usd > 0 %}{{ "%+.2f"|format(p.gain_loss_pct) }}% &nbsp; ${{ "%+.2f"|format(p.gain_loss_usd) }}
         {% else %}Cost: ${{ "%.2f"|format(p.cost_basis_usd) }}{% endif %}
       </div>
       <div class="sub2">
@@ -137,92 +207,44 @@ HTML = """
         <span class="tag-sl">SL: {% if p.stop_loss_price %}${{ "%.4f"|format(p.stop_loss_price) }}{% else %}—{% endif %}</span>
       </div>
     </div>
+    {% else %}
+    <div style="color:#475569;font-size:0.8rem;padding:8px 0">No open positions</div>
     {% endfor %}
-
-  </div>
-
-  <!-- ROW 2: P&L & TAXES -->
-  <div class="row-label" style="margin-top:20px">Profit, Loss &amp; Taxes</div>
-  <div class="grid grid-pnl">
-
-    <div class="card">
-      <div class="label">Unrealized P&L</div>
-      <div class="value {{ 'pos' if stats.unrealized_gain >= 0 else 'neg' }}">
-        ${{ "%+.2f"|format(stats.unrealized_gain) }}
-      </div>
-      <div class="sub">Open positions</div>
-    </div>
-
-    <div class="card">
-      <div class="label">Realized P&L</div>
-      <div class="value {{ 'pos' if stats.realized_gain >= 0 else 'neg' }}">
-        ${{ "%+.2f"|format(stats.realized_gain) }}
-      </div>
-      <div class="sub">{{ stats.total_trades }} closed trades</div>
-    </div>
-
-    <div class="card">
-      <div class="label">Total P&L</div>
-      <div class="value {{ 'pos' if (stats.unrealized_gain + stats.realized_gain) >= 0 else 'neg' }}">
-        ${{ "%+.2f"|format(stats.unrealized_gain + stats.realized_gain) }}
-      </div>
-      <div class="sub">Realized + unrealized</div>
-    </div>
-
-    <div class="card">
-      <div class="label">Short-term Gains</div>
-      <div class="value sm {{ 'pos' if stats.short_term >= 0 else 'neg' }}">
-        ${{ "%+.2f"|format(stats.short_term) }}
-      </div>
-      <div class="sub">Tax: ordinary income</div>
-    </div>
-
-    <div class="card">
-      <div class="label">Long-term Gains</div>
-      <div class="value sm {{ 'pos' if stats.long_term >= 0 else 'neg' }}">
-        ${{ "%+.2f"|format(stats.long_term) }}
-      </div>
-      <div class="sub">Tax: capital gains rate</div>
-    </div>
-
-    <div class="card">
-      <div class="label">Gas Fees Paid</div>
-      <div class="value sm">${{ "%.2f"|format(stats.total_gas_usd) }}</div>
-      <div class="sub">{{ stats.total_txns }} transactions total</div>
-    </div>
-
   </div>
 
   <!-- OPEN POSITIONS DETAIL -->
-  <div class="section" style="margin-top:20px">
+  <div class="section" style="margin-top:16px">
     <h2>Open Positions — Detail</h2>
     {% if open_positions %}
     <table>
       <tr>
-        <th>Token</th><th>Amount</th><th>Entry Price</th><th>Current Price</th>
-        <th>Cost Basis</th><th>Current Value</th><th>P&L $</th><th>P&L %</th>
-        <th>Take Profit</th><th>Stop Loss</th><th>Hold Window</th><th>Opened</th><th>Tx</th>
+        <th>Token</th><th>Amount</th><th>Entry</th><th>Current</th>
+        <th>Cost</th><th>Value</th><th>P&L $</th><th>P&L %</th>
+        <th>Take Profit</th><th>Stop Loss</th><th>Window</th><th>Opened</th><th>Tx</th>
       </tr>
       {% for p in open_positions %}
       <tr>
-        <td><strong>{{ p.symbol }}</strong></td>
-        <td>{{ "%.6f"|format(p.amount_tokens) }}</td>
+        <td>
+          {% if p.cg_url %}<a href="{{ p.cg_url }}" target="_blank" class="cglink">{{ p.symbol }}</a>
+          {% else %}<strong>{{ p.symbol }}</strong>{% endif %}
+        </td>
+        <td>{{ "%.4f"|format(p.amount_tokens) }}</td>
         <td>{% if p.entry_price > 0 %}${{ "%.6f"|format(p.entry_price) }}{% else %}<span class="tag-unk">unknown</span>{% endif %}</td>
         <td>{% if p.current_price > 0 %}${{ "%.6f"|format(p.current_price) }}{% else %}<span class="tag-unk">pending</span>{% endif %}</td>
-        <td>{% if p.cost_basis_usd > 0 %}${{ "%.2f"|format(p.cost_basis_usd) }}{% else %}<span class="tag-unk">—</span>{% endif %}</td>
-        <td>{% if p.current_value > 0 %}${{ "%.2f"|format(p.current_value) }}{% else %}<span class="tag-unk">—</span>{% endif %}</td>
-        <td class="{{ 'pos' if p.gain_loss_usd >= 0 else ('neg' if p.gain_loss_usd < 0 else '') }}">
+        <td>{% if p.cost_basis_usd > 0 %}${{ "%.2f"|format(p.cost_basis_usd) }}{% else %}—{% endif %}</td>
+        <td>{% if p.current_value > 0 %}${{ "%.2f"|format(p.current_value) }}{% else %}—{% endif %}</td>
+        <td class="{{ 'pos' if p.gain_loss_usd >= 0 else 'neg' }}">
           {% if p.cost_basis_usd > 0 %}${{ "%+.2f"|format(p.gain_loss_usd) }}{% else %}—{% endif %}
         </td>
-        <td class="{{ 'pos' if p.gain_loss_pct > 0 else ('neg' if p.gain_loss_pct < 0 else '') }}">
+        <td class="{{ 'pos' if p.gain_loss_pct > 0 else 'neg' }}">
           {% if p.cost_basis_usd > 0 %}{{ "%+.2f"|format(p.gain_loss_pct) }}%{% else %}—{% endif %}
         </td>
         <td class="tag-tp">{% if p.take_profit_price %}${{ "%.6f"|format(p.take_profit_price) }}<br>(+{{ p.take_profit_pct }}%){% else %}—{% endif %}</td>
         <td class="tag-sl">{% if p.stop_loss_price %}${{ "%.6f"|format(p.stop_loss_price) }}<br>(-{{ p.stop_loss_pct }}%){% else %}—{% endif %}</td>
         <td {% if p.hours_remaining is not none and p.hours_remaining < 4 %}class="warn"{% endif %}>
-          {% if p.hours_remaining is not none %}{% if p.hours_remaining < 0 %}Expired{% else %}{{ p.hours_remaining }}h left{% endif %}{% else %}—{% endif %}
+          {% if p.hours_remaining is not none %}{% if p.hours_remaining < 0 %}Expired{% else %}{{ p.hours_remaining }}h{% endif %}{% else %}—{% endif %}
         </td>
-        <td style="color:#64748b;font-size:0.72rem">{{ p.date_opened[:16].replace('T',' ') }}</td>
+        <td style="color:#64748b;font-size:0.7rem">{{ p.date_opened[:16].replace('T',' ') }}</td>
         <td><a href="https://basescan.org/tx/{{ p.get('entry_tx','') }}" target="_blank" class="hash">{{ p.get('entry_tx','')[:8] }}...</a></td>
       </tr>
       {% endfor %}
@@ -232,23 +254,32 @@ HTML = """
     {% endif %}
   </div>
 
-  <!-- WATCHLIST -->
-  <div class="section">
+</div>
+</div><!-- end tab-portfolio -->
+
+<!-- TAB: WATCHLIST -->
+<div id="tab-watchlist" class="tab-content">
+<div class="container">
+  <div class="section" style="margin-top:16px">
     <h2>Agent Watchlist — Top 20 Being Monitored
-      {% if cache_updated %}<span style="font-weight:400;color:#475569;font-size:0.7rem;margin-left:8px">Updated {{ cache_updated }}</span>{% endif %}
+      {% if cache_updated %}<span style="font-weight:400;color:#475569;font-size:0.68rem;margin-left:8px">Updated {{ cache_updated }}</span>{% endif %}
     </h2>
+    <p style="color:#64748b;font-size:0.78rem;margin-bottom:12px">Tokens the agent is watching for entry signals. Click Don't Buy to block a token permanently.</p>
     {% if watchlist %}
     <table>
       <tr><th>Token</th><th>Price</th><th>1h</th><th>24h</th><th>Mkt Cap</th><th>Signals</th><th>Action</th></tr>
       {% for c in watchlist %}
       <tr style="{{ 'opacity:0.3' if c.blocked else '' }}">
-        <td><strong>{{ c.symbol }}</strong><span style="color:#475569;font-size:0.72rem;display:block">{{ c.name }}</span></td>
+        <td>
+          <a href="https://www.coingecko.com/en/coins/{{ c.cg_id }}" target="_blank" class="cglink">{{ c.symbol }}</a>
+          <span style="color:#475569;font-size:0.7rem;display:block">{{ c.name }}</span>
+        </td>
         <td>${{ "%.4f"|format(c.price|float) }}</td>
         <td class="{{ 'pos' if c.change_1h|float >= 0 else 'neg' }}">{{ "%+.2f"|format(c.change_1h|float) }}%</td>
         <td class="{{ 'pos' if c.change_24h|float >= 0 else 'neg' }}">{{ "%+.2f"|format(c.change_24h|float) }}%</td>
         <td>${{ "%.0fM"|format(c.market_cap|float / 1e6) }}</td>
-        <td style="font-size:0.75rem;color:#94a3b8">
-          {% if c.blocked %}<span style="color:#ef4444">Blocked by you</span>
+        <td style="font-size:0.73rem;color:#94a3b8">
+          {% if c.blocked %}<span style="color:#ef4444">Blocked</span>
           {% elif c.signals %}{% for s in c.signals %}<span style="display:block">• {{ s }}</span>{% endfor %}
           {% else %}<span style="color:#475569">Monitoring</span>{% endif %}
         </td>
@@ -256,13 +287,13 @@ HTML = """
           {% if c.blocked %}
           <form method="POST" action="/unblock" style="display:inline">
             <input type="hidden" name="symbol" value="{{ c.symbol }}">
-            <button type="submit" style="background:#22c55e22;color:#22c55e;border:1px solid #22c55e44;padding:3px 10px;border-radius:6px;cursor:pointer;font-size:0.75rem">Unblock</button>
+            <button type="submit" style="background:#22c55e22;color:#22c55e;border:1px solid #22c55e44;padding:3px 9px;border-radius:5px;cursor:pointer;font-size:0.73rem">Unblock</button>
           </form>
           {% else %}
           <form method="POST" action="/block" style="display:inline">
             <input type="hidden" name="symbol" value="{{ c.symbol }}">
             <input type="hidden" name="cg_id"  value="{{ c.cg_id }}">
-            <button type="submit" style="background:#ef444422;color:#ef4444;border:1px solid #ef444444;padding:3px 10px;border-radius:6px;cursor:pointer;font-size:0.75rem">Don't Buy</button>
+            <button type="submit" style="background:#ef444422;color:#ef4444;border:1px solid #ef444444;padding:3px 9px;border-radius:5px;cursor:pointer;font-size:0.73rem">Don't Buy</button>
           </form>
           {% endif %}
         </td>
@@ -273,9 +304,14 @@ HTML = """
     <div class="empty">Populates after first bot tick</div>
     {% endif %}
   </div>
+</div>
+</div><!-- end tab-watchlist -->
 
-  <!-- CLOSED TRADES -->
-  <div class="section">
+<!-- TAB: HISTORY -->
+<div id="tab-history" class="tab-content">
+<div class="container">
+
+  <div class="section" style="margin-top:16px">
     <h2>Closed Trades</h2>
     {% if closed_trades %}
     <table>
@@ -302,7 +338,6 @@ HTML = """
     {% endif %}
   </div>
 
-  <!-- ALL TRANSACTIONS -->
   <div class="section">
     <h2>All Transactions</h2>
     {% if transactions %}
@@ -310,7 +345,7 @@ HTML = """
       <tr><th>Date</th><th>Sold</th><th>Amount</th><th>Bought</th><th>Gas</th><th>Status</th><th>Tx</th></tr>
       {% for t in transactions %}
       <tr>
-        <td style="color:#64748b;font-size:0.75rem">{{ t.date_utc }}</td>
+        <td style="color:#64748b;font-size:0.73rem">{{ t.date_utc }}</td>
         <td>{{ t.token_in }}</td>
         <td>${{ "%.2f"|format(t.amount_in|float) }}</td>
         <td>{{ t.token_out }}</td>
@@ -326,6 +361,16 @@ HTML = """
   </div>
 
 </div>
+</div><!-- end tab-history -->
+
+<script>
+function showTab(name) {
+  document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(el => el.classList.remove('active'));
+  document.getElementById('tab-' + name).classList.add('active');
+  event.target.classList.add('active');
+}
+</script>
 </body>
 </html>
 """
@@ -397,10 +442,44 @@ def index():
     wallet_address = Account.from_key(PRIVATE_KEY).address
 
     balances   = _get_full_balances(w3, wallet_address, prices)
-    open_pos   = get_position_summary(prices)
     realized   = get_realized_summary()
     closed     = _load_csv("records/realized_gains.csv")
     txns       = list(reversed(_load_csv("records/transactions.csv")))
+
+    # Enrich prices with custom token prices from token cache
+    from bot.token_cache import list_all as list_token_cache
+    tc = list_token_cache()
+    for cg_id, info in tc.items():
+        sym = info.get("name", "").upper()
+        if sym not in prices and info.get("price", 0) > 0:
+            prices[sym] = info["price"]
+
+    open_pos = get_position_summary(prices)
+
+    # Add CoinGecko ID and URL to each open position
+    for p in open_pos:
+        sym = p["symbol"]
+        cg_id = next((k for k, v in tc.items()
+                      if v.get("name","").upper() == sym.upper()), None)
+        # Also check by symbol match
+        if not cg_id:
+            cg_id = next((k for k, v in tc.items()
+                          if k.upper() == sym.upper()), None)
+        p["cg_id"]  = cg_id or ""
+        p["cg_url"] = f"https://www.coingecko.com/en/coins/{cg_id}" if cg_id else ""
+
+    # Fix portfolio total: use max of balance-based total vs sum of positions + USDC + ETH
+    usdc_bal    = balances.get("USDC", {}).get("balance", 0.0)
+    usdc_usd    = usdc_bal  # always $1
+    eth_bal     = balances.get("ETH", {}).get("balance", 0.0)
+    eth_price   = prices.get("WETH", 0.0)
+    eth_usd     = eth_bal * eth_price
+    pos_total   = sum(max(p["current_value"], p["cost_basis_usd"]) for p in open_pos)
+    total_usd   = usdc_usd + eth_usd + pos_total
+
+    unrealized   = sum(p["gain_loss_usd"] for p in open_pos)
+    deployed_usd = sum(p["cost_basis_usd"] for p in open_pos)
+    usdc_pct     = (usdc_usd / total_usd * 100) if total_usd > 0 else 0
 
     # Load agent watchlist from cache
     watchlist = []
@@ -414,15 +493,6 @@ def index():
         for c in cache.get("watchlist", []):
             c["blocked"] = c.get("symbol", "").upper() in blocked_syms
             watchlist.append(c)
-
-    unrealized   = sum(p["gain_loss_usd"] for p in open_pos)
-    deployed_usd = sum(p["cost_basis_usd"] for p in open_pos)
-    usdc_bal     = balances.get("USDC", {}).get("balance", 0.0)
-    usdc_usd     = balances.get("USDC", {}).get("value_usd", 0.0)
-    eth_bal      = balances.get("ETH", {}).get("balance", 0.0)
-    eth_price    = prices.get("WETH", 0.0)
-    total_usd    = balances.get("_total_usd", 0.0)
-    usdc_pct     = (usdc_usd / total_usd * 100) if total_usd > 0 else 0
 
     # Gas fees paid
     total_gas_eth = sum(float(t.get("gas_cost_eth", 0) or 0) for t in txns)
