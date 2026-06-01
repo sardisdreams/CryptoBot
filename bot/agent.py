@@ -1,4 +1,5 @@
-import json
+import httpx
+import certifi
 import anthropic
 from bot.config import ANTHROPIC_API_KEY, TOKENS
 from bot.portfolio import Portfolio
@@ -9,20 +10,31 @@ logger = setup_logger("agent")
 
 SYSTEM_PROMPT = """You are an autonomous crypto trading agent operating on the Base blockchain.
 
-Your job is to analyze the current portfolio and market conditions, then decide whether to make trades.
+Your goal is to grow the total USD value of the portfolio in an aggressive but safe way.
 
-Guidelines:
-- Preserve capital — only trade when there is a clear opportunity
-- Never risk more than 10% of total portfolio value in a single trade
-- Keep at least 0.005 ETH in reserve for gas fees at all times
-- Prefer stable positions (USDC) when market conditions are uncertain
-- Diversify across multiple tokens when there is conviction
-- Consider current allocations — avoid over-concentration in any single asset
+## Strategy guidelines (use your judgment — these are not rigid rules)
+- USDC is home base. After taking profits or closing a position, always sell back to USDC.
+- Be aggressive when there is conviction. Be cautious when conditions are unclear. When in doubt, stay in USDC.
+- Micro trades are encouraged — small opportunistic positions are fine.
+- Keep at least 50% of the portfolio in USDC at all times as a stability floor.
+- Never let ETH balance drop below 0.005 ETH — this is needed for gas.
+- No borrowing. Spot trading only.
+- Preserve capital first, grow second.
 
-When you decide to trade, use the execute_swap tool. You may call it multiple times for multiple trades.
-If no action is warranted, call no tools and explain your reasoning briefly.
+## Token safety — critical
+- ONLY trade tokens that are in the approved whitelist. Never trade unknown or unlisted tokens.
+- Be very suspicious of any token showing sudden large price movements with no clear catalyst.
+- Pump-and-dump warning signs: sudden volume spike, price surge on a low-cap or new token, no legitimate project behind it.
+- Legitimate tokens have: an established website, an active Twitter/X account, at least 6 months of history, real liquidity, and a clear project.
+- If a token's price moves more than 20% in a single tick with no obvious reason, treat it as suspicious — stay in USDC.
+- When in doubt about a token's legitimacy, do not trade it. Capital preservation beats missing an opportunity.
 
-Always reason step by step before acting."""
+## How to trade
+- You will receive a portfolio snapshot and live market prices each tick.
+- Analyze price levels, portfolio allocations, and any patterns you observe.
+- If you see an opportunity, use the execute_swap tool. You may call it multiple times.
+- If conditions are uncertain or no clear opportunity exists, do nothing and explain why.
+- Always reason step by step before acting."""
 
 TOOLS = [
     {
@@ -58,7 +70,10 @@ class TradingAgent:
     def __init__(self, portfolio: Portfolio, executor: Executor):
         self.portfolio = portfolio
         self.executor = executor
-        self.client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        self.client = anthropic.Anthropic(
+            api_key=ANTHROPIC_API_KEY,
+            http_client=httpx.Client(verify=certifi.where()),
+        )
 
     def _build_market_prompt(self, snapshot: dict) -> str:
         lines = [
@@ -78,9 +93,23 @@ class TradingAgent:
         for symbol, price in snapshot["prices"].items():
             lines.append(f"  {symbol}: ${price:,.4f}")
 
+        fg = snapshot.get("fear_and_greed", {})
         lines += [
             "",
-            "Available tokens for trading:",
+            f"Fear & Greed Index: {fg.get('value', 'N/A')} / 100 — {fg.get('label', 'Unknown')}",
+            "(0=Extreme Fear, 50=Neutral, 100=Extreme Greed)",
+        ]
+
+        trending = snapshot.get("trending_tokens", [])
+        if trending:
+            lines += ["", "Currently trending on CoinGecko (monitor for pump-and-dump risk):"]
+            for t in trending:
+                rank = t.get("market_cap_rank") or "unranked"
+                lines.append(f"  {t['symbol']} ({t['name']}) — market cap rank: {rank}")
+
+        lines += [
+            "",
+            "Approved tokens for trading (whitelist only):",
             ", ".join(TOKENS.keys()),
         ]
         return "\n".join(lines)
@@ -138,6 +167,9 @@ class TradingAgent:
     def run_once(self):
         logger.info("Agent tick: fetching portfolio snapshot...")
         snapshot = self.portfolio.get_snapshot()
+        context = self.portfolio.market.get_full_context()
+        snapshot["fear_and_greed"] = context["fear_and_greed"]
+        snapshot["trending_tokens"] = context["trending_tokens"]
         market_context = self._build_market_prompt(snapshot)
 
         messages = [{"role": "user", "content": market_context}]

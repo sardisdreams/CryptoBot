@@ -1,6 +1,8 @@
-import os
+import bot.ssl_fix  # must be first import — patches SSL before any HTTPS calls
+
 import time
 import schedule
+import requests
 from web3 import Web3
 from dotenv import load_dotenv
 
@@ -24,7 +26,9 @@ RUN_INTERVAL_SECONDS = 300  # Run agent every 5 minutes
 def main():
     validate()
 
-    w3 = Web3(Web3.HTTPProvider(BASE_RPC_URL))
+    session = requests.Session()
+    session.verify = certifi.where()
+    w3 = Web3(Web3.HTTPProvider(BASE_RPC_URL, session=session))
     if not w3.is_connected():
         logger.error(f"Cannot connect to Base RPC: {BASE_RPC_URL}")
         raise SystemExit(1)

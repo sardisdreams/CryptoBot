@@ -3,6 +3,7 @@ import os
 import colorlog
 
 def setup_logger(name: str = "cryptobot") -> logging.Logger:
+    os.makedirs("logs", exist_ok=True)
     level = os.getenv("LOG_LEVEL", "INFO").upper()
 
     handler = colorlog.StreamHandler()

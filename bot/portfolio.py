@@ -14,10 +14,10 @@ ERC20_BALANCE_ABI = [
 
 
 class Portfolio:
-    def __init__(self, w3: Web3, wallet: Wallet, market: Market):
+    def __init__(self, w3: Web3, wallet: Wallet, market: Market = None):
         self.w3 = w3
         self.wallet = wallet
-        self.market = market
+        self.market = market or Market()
 
     def get_snapshot(self) -> dict:
         """Return full portfolio: balances, USD values, total value, allocations."""

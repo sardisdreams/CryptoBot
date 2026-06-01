@@ -31,15 +31,20 @@ ROUTER_ABI = [
 
 QUOTER_ABI = [
     {
-        "inputs": [
+        "inputs": [{"components": [
             {"name": "tokenIn", "type": "address"},
             {"name": "tokenOut", "type": "address"},
-            {"name": "fee", "type": "uint24"},
             {"name": "amountIn", "type": "uint256"},
+            {"name": "fee", "type": "uint24"},
             {"name": "sqrtPriceLimitX96", "type": "uint160"},
-        ],
+        ], "name": "params", "type": "tuple"}],
         "name": "quoteExactInputSingle",
-        "outputs": [{"name": "amountOut", "type": "uint256"}],
+        "outputs": [
+            {"name": "amountOut", "type": "uint256"},
+            {"name": "sqrtPriceX96After", "type": "uint160"},
+            {"name": "initializedTicksCrossed", "type": "uint32"},
+            {"name": "gasEstimate", "type": "uint256"},
+        ],
         "stateMutability": "nonpayable",
         "type": "function",
     }
@@ -71,13 +76,14 @@ class Executor:
 
     def get_quote(self, token_in: str, token_out: str, amount_in_wei: int, fee: int = DEFAULT_FEE) -> int:
         try:
-            return self.quoter.functions.quoteExactInputSingle(
-                Web3.to_checksum_address(token_in),
-                Web3.to_checksum_address(token_out),
-                fee,
-                amount_in_wei,
-                0,
-            ).call()
+            result = self.quoter.functions.quoteExactInputSingle({
+                "tokenIn": Web3.to_checksum_address(token_in),
+                "tokenOut": Web3.to_checksum_address(token_out),
+                "amountIn": amount_in_wei,
+                "fee": fee,
+                "sqrtPriceLimitX96": 0,
+            }).call()
+            return result[0]
         except Exception as e:
             logger.error(f"Quote failed: {e}")
             return 0

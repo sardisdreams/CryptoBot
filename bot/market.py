@@ -1,92 +1,111 @@
-from web3 import Web3
-from bot.config import UNISWAP_V3_QUOTER, USDC_ADDRESS, WETH_ADDRESS, TOKENS, STABLECOINS, DEFAULT_FEE
+import requests
+import certifi
+from bot.config import TOKENS, STABLECOINS
 from bot.logger import setup_logger
 
 logger = setup_logger("market")
 
-QUOTER_ABI = [
-    {
-        "inputs": [
-            {"name": "tokenIn", "type": "address"},
-            {"name": "tokenOut", "type": "address"},
-            {"name": "fee", "type": "uint24"},
-            {"name": "amountIn", "type": "uint256"},
-            {"name": "sqrtPriceLimitX96", "type": "uint160"},
-        ],
-        "name": "quoteExactInputSingle",
-        "outputs": [{"name": "amountOut", "type": "uint256"}],
-        "stateMutability": "nonpayable",
-        "type": "function",
-    }
-]
+COINGECKO_IDS = {
+    "WETH":  "ethereum",
+    "USDC":  "usd-coin",
+    "USDT":  "tether",
+    "DAI":   "dai",
+    "cbBTC": "coinbase-wrapped-btc",
+    "cbETH": "coinbase-wrapped-staked-eth",
+}
+
+COINGECKO_URL       = "https://api.coingecko.com/api/v3/simple/price"
+FEAR_GREED_URL      = "https://api.alternative.me/fng/"
+COINGECKO_TRENDING  = "https://api.coingecko.com/api/v3/search/trending"
+
+SSL = certifi.where()
 
 
 class Market:
-    def __init__(self, w3: Web3):
+    def __init__(self, w3=None):
         self.w3 = w3
-        self.quoter = w3.eth.contract(
-            address=Web3.to_checksum_address(UNISWAP_V3_QUOTER),
-            abi=QUOTER_ABI,
-        )
-
-    def get_price_usd(self, symbol: str) -> float:
-        """Return the USD price of any token in the registry."""
-        if symbol in STABLECOINS:
-            return 1.0
-
-        token = TOKENS.get(symbol)
-        if not token:
-            logger.warning(f"Unknown token: {symbol}")
-            return 0.0
-
-        try:
-            amount_in = 10 ** token["decimals"]
-            usdc_out = self.quoter.functions.quoteExactInputSingle(
-                Web3.to_checksum_address(token["address"]),
-                Web3.to_checksum_address(USDC_ADDRESS),
-                DEFAULT_FEE,
-                amount_in,
-                0,
-            ).call()
-            return usdc_out / 1e6
-        except Exception:
-            # Fallback: route through WETH then USDC
-            try:
-                eth_out = self.quoter.functions.quoteExactInputSingle(
-                    Web3.to_checksum_address(token["address"]),
-                    Web3.to_checksum_address(WETH_ADDRESS),
-                    DEFAULT_FEE,
-                    10 ** token["decimals"],
-                    0,
-                ).call()
-                eth_price = self._get_eth_price_usd()
-                return (eth_out / 1e18) * eth_price
-            except Exception as e:
-                logger.error(f"Price fetch failed for {symbol}: {e}")
-                return 0.0
-
-    def _get_eth_price_usd(self) -> float:
-        try:
-            usdc_out = self.quoter.functions.quoteExactInputSingle(
-                Web3.to_checksum_address(WETH_ADDRESS),
-                Web3.to_checksum_address(USDC_ADDRESS),
-                DEFAULT_FEE,
-                10 ** 18,
-                0,
-            ).call()
-            return usdc_out / 1e6
-        except Exception as e:
-            logger.error(f"ETH price fetch failed: {e}")
-            return 0.0
 
     def get_all_prices(self) -> dict[str, float]:
-        """Return USD prices for all tokens in the registry."""
-        prices = {}
-        eth_price = self._get_eth_price_usd()
-        prices["WETH"] = eth_price
-        for symbol in TOKENS:
-            if symbol == "WETH":
-                continue
-            prices[symbol] = self.get_price_usd(symbol)
-        logger.info(f"Prices fetched: { {k: f'${v:,.2f}' for k, v in prices.items()} }")
-        return prices
+        ids = ",".join(COINGECKO_IDS.values())
+        try:
+            response = requests.get(
+                COINGECKO_URL,
+                params={"ids": ids, "vs_currencies": "usd"},
+                timeout=10,
+                verify=SSL,
+            )
+            response.raise_for_status()
+            data = response.json()
+
+            prices = {}
+            for symbol in TOKENS:
+                if symbol in STABLECOINS:
+                    prices[symbol] = 1.0
+                    continue
+                cg_id = COINGECKO_IDS.get(symbol)
+                if cg_id and cg_id in data:
+                    prices[symbol] = data[cg_id]["usd"]
+                else:
+                    prices[symbol] = 0.0
+                    logger.warning(f"No price data for {symbol}")
+
+            logger.info(f"Prices: { {k: f'${v:,.2f}' for k, v in prices.items()} }")
+            return prices
+
+        except Exception as e:
+            logger.error(f"Price fetch failed: {e}")
+            return {symbol: 0.0 for symbol in TOKENS}
+
+    def get_price_usd(self, symbol: str) -> float:
+        return self.get_all_prices().get(symbol.upper(), 0.0)
+
+    def get_fear_and_greed(self) -> dict:
+        """
+        Returns the Crypto Fear & Greed Index.
+        Value 0-100: 0=Extreme Fear, 50=Neutral, 100=Extreme Greed.
+        """
+        try:
+            response = requests.get(FEAR_GREED_URL, timeout=10, verify=SSL)
+            response.raise_for_status()
+            data = response.json()["data"][0]
+            result = {
+                "value": int(data["value"]),
+                "label": data["value_classification"],  # e.g. "Fear", "Greed", "Extreme Greed"
+            }
+            logger.info(f"Fear & Greed: {result['value']} ({result['label']})")
+            return result
+        except Exception as e:
+            logger.warning(f"Fear & Greed fetch failed: {e}")
+            return {"value": 50, "label": "Unknown"}
+
+    def get_trending_tokens(self) -> list[dict]:
+        """
+        Returns top trending tokens on CoinGecko.
+        Useful for detecting hype / potential pump-and-dump targets to AVOID.
+        """
+        try:
+            response = requests.get(COINGECKO_TRENDING, timeout=10, verify=SSL)
+            response.raise_for_status()
+            coins = response.json().get("coins", [])
+            trending = []
+            for item in coins[:7]:
+                coin = item["item"]
+                trending.append({
+                    "name": coin["name"],
+                    "symbol": coin["symbol"].upper(),
+                    "market_cap_rank": coin.get("market_cap_rank"),
+                    "score": coin.get("score", 0),
+                })
+            logger.info(f"Trending: {[t['symbol'] for t in trending]}")
+            return trending
+        except Exception as e:
+            logger.warning(f"Trending fetch failed: {e}")
+            return []
+
+    def get_full_context(self) -> dict:
+        """Single call that returns prices + fear/greed + trending for the agent."""
+        return {
+            "prices": self.get_all_prices(),
+            "fear_and_greed": self.get_fear_and_greed(),
+            "trending_tokens": self.get_trending_tokens(),
+        }
