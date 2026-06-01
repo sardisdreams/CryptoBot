@@ -285,7 +285,8 @@ class TradingAgent:
         if gainers:
             lines += ["", "Top gainers (24h):"]
             for g in gainers[:3]:
-                lines.append(f"  {g['symbol']}: {g['change']:+.1f}% | cgid:{g['cg_id']}")
+                chg = g.get("change_24h", g.get("change", 0))
+                lines.append(f"  {g['symbol']}: {chg:+.1f}% | cgid:{g['cg_id']}")
 
         # DeFiLlama — top 5 Base protocols with biggest TVL change only
         defillama = snapshot.get("defillama_base", [])
