@@ -139,12 +139,18 @@ def get_defillama_base_protocols() -> list[dict]:
 
 
 def get_screening_report() -> dict:
-    """Full screening report with delays to respect CoinGecko rate limits."""
-    base  = get_base_ecosystem_coins()
+    """Full screening report — derives gainers from base ecosystem to avoid extra API calls."""
+    base = get_base_ecosystem_coins()
     time.sleep(1.5)
-    gainers = get_top_gainers(24)
-    time.sleep(1.0)
-    defi  = get_defillama_base_protocols()
+    defi = get_defillama_base_protocols()
+
+    # Derive top gainers from already-fetched base ecosystem data (no extra API call)
+    gainers = sorted(
+        [c for c in base if abs(c.get("change_24h", 0)) >= 3],
+        key=lambda c: c.get("change_24h", 0),
+        reverse=True,
+    )[:5]
+
     return {
         "base_ecosystem":  base,
         "top_gainers_24h": gainers,
