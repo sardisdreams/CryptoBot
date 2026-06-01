@@ -3,11 +3,12 @@ from web3 import Web3
 from bot.config import (
     UNISWAP_V3_ROUTER, UNISWAP_V3_QUOTER,
     SLIPPAGE_TOLERANCE, GAS_LIMIT, BASE_CHAIN_ID, DEFAULT_FEE, WETH_ADDRESS,
+    STABLECOINS,
 )
 from bot.wallet import Wallet
 from bot.logger import setup_logger
 from bot import recorder, positions
-from bot.config import STABLECOINS
+from bot.aerodrome import AerodromeRouter
 
 logger = setup_logger("executor")
 
@@ -68,6 +69,7 @@ class Executor:
     def __init__(self, w3: Web3, wallet: Wallet):
         self.w3 = w3
         self.wallet = wallet
+        self.aerodrome = AerodromeRouter(w3, wallet)
         self.router = w3.eth.contract(
             address=Web3.to_checksum_address(UNISWAP_V3_ROUTER), abi=ROUTER_ABI
         )
@@ -136,40 +138,62 @@ class Executor:
         token_out_price_usd: float = 0.0,
         fee: int = DEFAULT_FEE,
     ) -> str | None:
+        # Try Uniswap V3 first, fall back to Aerodrome
+        dex_used = "uniswap_v3"
         amount_out = self.get_quote(token_in_address, token_out_address, amount_in_wei, fee)
+        aerodrome_routes = None
+
         if amount_out == 0:
-            logger.warning("Swap skipped: quote returned 0")
+            logger.info("Uniswap V3 quote = 0, trying Aerodrome...")
+            amount_out, aerodrome_routes = self.aerodrome.get_quote(
+                token_in_address, token_out_address, amount_in_wei
+            )
+            if amount_out > 0:
+                dex_used = "aerodrome"
+
+        if amount_out == 0:
+            logger.warning("Swap skipped: no liquidity on Uniswap V3 or Aerodrome")
             return None
 
-        is_native_eth = token_in_address.lower() == WETH_ADDRESS.lower()
-        if not is_native_eth:
-            self._ensure_approval(token_in_address, amount_in_wei)
+        logger.info(f"Executing on {dex_used}: {amount_in_wei / 10**token_in_decimals:.6f} {token_in_symbol} -> {token_out_symbol}")
 
-        min_out = int(amount_out * (1 - SLIPPAGE_TOLERANCE))
-        deadline = int(time.time()) + 300
+        # Execute on the DEX that gave us a quote
+        if dex_used == "aerodrome":
+            tx_hash = self.aerodrome.swap(
+                token_in_address, token_out_address,
+                amount_in_wei, aerodrome_routes, amount_out,
+            )
+            if not tx_hash:
+                return None
+        else:
+            is_native_eth = token_in_address.lower() == WETH_ADDRESS.lower()
+            if not is_native_eth:
+                self._ensure_approval(token_in_address, amount_in_wei)
+
+            min_out   = int(amount_out * (1 - SLIPPAGE_TOLERANCE))
+            deadline  = int(time.time()) + 300
+            gas_price = self.w3.eth.gas_price
+
+            tx = self.router.functions.exactInputSingle({
+                "tokenIn": Web3.to_checksum_address(token_in_address),
+                "tokenOut": Web3.to_checksum_address(token_out_address),
+                "fee": fee,
+                "recipient": self.wallet.address,
+                "deadline": deadline,
+                "amountIn": amount_in_wei,
+                "amountOutMinimum": min_out,
+                "sqrtPriceLimitX96": 0,
+            }).build_transaction({
+                "from": self.wallet.address,
+                "value": amount_in_wei if is_native_eth else 0,
+                "gas": GAS_LIMIT,
+                "gasPrice": gas_price,
+                "nonce": self.wallet.get_nonce(),
+                "chainId": BASE_CHAIN_ID,
+            })
+            tx_hash = self.wallet.sign_and_send(tx)
+
         gas_price = self.w3.eth.gas_price
-
-        tx = self.router.functions.exactInputSingle({
-            "tokenIn": Web3.to_checksum_address(token_in_address),
-            "tokenOut": Web3.to_checksum_address(token_out_address),
-            "fee": fee,
-            "recipient": self.wallet.address,
-            "deadline": deadline,
-            "amountIn": amount_in_wei,
-            "amountOutMinimum": min_out,
-            "sqrtPriceLimitX96": 0,
-        }).build_transaction({
-            "from": self.wallet.address,
-            "value": amount_in_wei if is_native_eth else 0,
-            "gas": GAS_LIMIT,
-            "gasPrice": gas_price,
-            "nonce": self.wallet.get_nonce(),
-            "chainId": BASE_CHAIN_ID,
-        })
-
-        logger.info(f"Swapping {amount_in_wei / 10**token_in_decimals:.6f} {token_in_symbol} → {token_out_symbol}")
-        tx_hash = self.wallet.sign_and_send(tx)
-
         recorder.record_transaction(
             tx_hash=tx_hash,
             token_in=token_in_symbol,
