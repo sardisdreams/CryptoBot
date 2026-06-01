@@ -82,65 +82,59 @@ High conviction — buy up to 15%. Only use on tokens with real liquidity.
 No fixed rules — read the conditions. Sell into strength when momentum fades.
 If the trade thesis breaks, exit regardless of P&L. Always sell back to USDC.
 
-## Before trading a new coin
-Use the evaluate_coin tool with the CoinGecko ID to get a safety score.
-Only recommend adding a coin to the whitelist if it scores 50+ and has no critical flags.
-You cannot trade coins not in the approved whitelist — but you CAN recommend new ones for review.
+## Trading any coin
+You can trade ANY token on Base — no whitelist. Use get_token_info to look up a coin's
+contract address and decimals before trading it. Use evaluate_coin to check safety if uncertain.
 
 ## Pump and dump protection
-- Sudden >20% spike with no news or catalyst = likely pump, avoid
-- Volume/market cap ratio >5x = suspicious
-- Trending on CoinGecko with no fundamentals = warning sign
-- Token under 3 months old = skip
-
-## Token safety
-- ONLY trade whitelisted tokens
-- If something looks too good to be true, evaluate it first with evaluate_coin
-- Capital preservation beats FOMO
+- Sudden >20% spike with no news = likely pump, use caution
+- Volume/market cap >5x = suspicious, evaluate first
+- Token under 3 months old = high risk, size small
+- Use your judgment — don't ask for permission, act on conviction
 
 Always reason step by step before acting."""
 
 TOOLS = [
     {
-        "name": "evaluate_coin",
-        "description": "Run a safety and risk evaluation on a coin using its CoinGecko ID. Use this before recommending any new token for the watchlist or whitelist.",
+        "name": "get_token_info",
+        "description": "Look up a token's Base chain contract address, decimals, and current price by CoinGecko ID. Use this before trading any token not already in your holdings.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "cg_id": {
-                    "type": "string",
-                    "description": "The CoinGecko coin ID (e.g. 'ethereum', 'venice-token')",
-                },
+                "cg_id": {"type": "string", "description": "CoinGecko coin ID (e.g. 'venice-token', 'aerodrome-finance')"},
+            },
+            "required": ["cg_id"],
+        },
+    },
+    {
+        "name": "evaluate_coin",
+        "description": "Run a safety and risk evaluation on a coin. Returns a score 0-100 and flags. Use when uncertain about a token.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "cg_id": {"type": "string", "description": "CoinGecko coin ID"},
             },
             "required": ["cg_id"],
         },
     },
     {
         "name": "execute_swap",
-        "description": "Execute a token swap on Uniswap V3 on Base chain.",
+        "description": "Execute a token swap on Uniswap V3 on Base chain. For known tokens (USDC, WETH, cbBTC, cbETH) just provide the symbol. For any other token, provide the contract_address and decimals from get_token_info.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "token_in": {
-                    "type": "string",
-                    "description": "Symbol of the token to sell (e.g. WETH, USDC, cbBTC)",
-                },
-                "token_out": {
-                    "type": "string",
-                    "description": "Symbol of the token to buy",
-                },
-                "amount_usd": {
-                    "type": "number",
-                    "description": "USD value of the trade",
-                },
-                "reasoning": {
-                    "type": "string",
-                    "description": "Why you are making this trade",
-                },
+                "token_in":          {"type": "string", "description": "Symbol of token to sell (e.g. USDC, WETH) or 'CUSTOM' for unlisted tokens"},
+                "token_in_address":  {"type": "string", "description": "Contract address — only needed if token_in is not USDC/WETH/cbBTC/cbETH"},
+                "token_in_decimals": {"type": "integer", "description": "Token decimals — only needed if token_in is unlisted"},
+                "token_out":         {"type": "string", "description": "Symbol of token to buy or 'CUSTOM' for unlisted tokens"},
+                "token_out_address": {"type": "string", "description": "Contract address — only needed if token_out is not USDC/WETH/cbBTC/cbETH"},
+                "token_out_decimals":{"type": "integer", "description": "Token decimals — only needed if token_out is unlisted"},
+                "amount_usd":        {"type": "number", "description": "USD value of the trade"},
+                "reasoning":         {"type": "string", "description": "Why you are making this trade"},
             },
             "required": ["token_in", "token_out", "amount_usd", "reasoning"],
         },
-    }
+    },
 ]
 
 
@@ -307,7 +301,40 @@ class TradingAgent:
 
         return "\n".join(lines)
 
+    def _get_token_info(self, cg_id: str) -> str:
+        import requests as req
+        try:
+            resp = req.get(
+                f"https://api.coingecko.com/api/v3/coins/{cg_id}",
+                params={"localization": "false", "tickers": "false"},
+                timeout=15,
+                verify=certifi.where(),
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            platforms = data.get("detail_platforms", {}) or data.get("platforms", {})
+            base_info = platforms.get("base", {})
+            contract = base_info.get("contract_address") if isinstance(base_info, dict) else base_info
+            decimals = base_info.get("decimal_place", 18) if isinstance(base_info, dict) else 18
+            price = data.get("market_data", {}).get("current_price", {}).get("usd", 0)
+            name = data.get("name", cg_id)
+            if not contract:
+                return f"{name}: not found on Base chain. May not be deployed on Base."
+            return (
+                f"{name} ({cg_id})\n"
+                f"Base contract: {contract}\n"
+                f"Decimals: {decimals}\n"
+                f"Price: ${price:,.6f}\n"
+                f"Use these values in execute_swap."
+            )
+        except Exception as e:
+            return f"Could not fetch token info for {cg_id}: {e}"
+
     def _handle_tool(self, tool_name: str, tool_input: dict, snapshot: dict) -> str:
+        if tool_name == "get_token_info":
+            cg_id = tool_input.get("cg_id", "")
+            logger.info(f"Fetching token info: {cg_id}")
+            return self._get_token_info(cg_id)
         if tool_name == "evaluate_coin":
             cg_id = tool_input.get("cg_id", "")
             logger.info(f"Evaluating coin: {cg_id}")
@@ -316,30 +343,47 @@ class TradingAgent:
         return self._execute_tool(tool_input, snapshot)
 
     def _execute_tool(self, tool_input: dict, snapshot: dict) -> str:
-        token_in_sym = tool_input["token_in"].upper()
+        token_in_sym  = tool_input["token_in"].upper()
         token_out_sym = tool_input["token_out"].upper()
-        amount_usd = float(tool_input["amount_usd"])
-        reasoning = tool_input.get("reasoning", "")
+        amount_usd    = float(tool_input["amount_usd"])
+        reasoning     = tool_input.get("reasoning", "")
 
         logger.info(f"Agent decision: {token_in_sym} → {token_out_sym} | ${amount_usd:.2f} | {reasoning}")
 
-        token_in = TOKENS.get(token_in_sym)
-        token_out = TOKENS.get(token_out_sym)
+        # ETH alias
+        if token_in_sym == "ETH":  token_in_sym = "WETH"
+        if token_out_sym == "ETH": token_out_sym = "WETH"
 
-        # ETH (native) maps to WETH for routing
-        if token_in_sym == "ETH":
-            token_in = TOKENS["WETH"]
-            token_in_sym = "WETH"
-        if token_out_sym == "ETH":
-            token_out = TOKENS["WETH"]
-            token_out_sym = "WETH"
+        # Resolve token_in — known registry or custom address
+        if token_in_sym in TOKENS:
+            token_in = TOKENS[token_in_sym]
+        elif tool_input.get("token_in_address"):
+            token_in = {
+                "address":  tool_input["token_in_address"],
+                "decimals": int(tool_input.get("token_in_decimals", 18)),
+                "symbol":   token_in_sym,
+            }
+        else:
+            return f"Unknown token '{token_in_sym}' — use get_token_info to look up its contract address first"
 
-        if not token_in or not token_out:
-            return f"Error: unknown token symbol. Available: {', '.join(TOKENS.keys())}"
+        # Resolve token_out
+        if token_out_sym in TOKENS:
+            token_out = TOKENS[token_out_sym]
+        elif tool_input.get("token_out_address"):
+            token_out = {
+                "address":  tool_input["token_out_address"],
+                "decimals": int(tool_input.get("token_out_decimals", 18)),
+                "symbol":   token_out_sym,
+            }
+        else:
+            return f"Unknown token '{token_out_sym}' — use get_token_info to look up its contract address first"
 
+        # Get price for token_in
         price_in = snapshot["prices"].get(token_in_sym, 0)
-        if price_in == 0:
-            return f"Error: could not get price for {token_in_sym}"
+        if price_in == 0 and token_in_sym not in {"USDC","USDT","DAI"}:
+            return f"Could not get price for {token_in_sym} — run get_token_info first"
+        if token_in_sym in {"USDC","USDT","DAI"}:
+            price_in = 1.0
 
         # Convert USD amount to token units
         amount_tokens = amount_usd / price_in
