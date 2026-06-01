@@ -302,6 +302,36 @@ class TradingAgent:
             return f"Swap submitted: {tx_hash}"
         return "Swap failed — check logs"
 
+    def _is_market_active(self, snapshot: dict) -> bool:
+        """
+        Quick check: are there any interesting signals this tick?
+        If not, use Haiku. If yes, escalate to Sonnet.
+        """
+        fg = snapshot.get("fear_and_greed", {}).get("value", 50)
+        market_data = snapshot.get("market_data", {})
+
+        # Escalate if Fear & Greed is extreme
+        if fg <= 20 or fg >= 80:
+            return True
+
+        # Escalate if any whitelisted coin moved >3% in 1h
+        for sym, d in market_data.items():
+            if abs(d.get("change_1h", 0)) >= 3:
+                return True
+
+        # Escalate if analyst notes are present
+        if _read_notes():
+            return True
+
+        # Escalate if RSI is oversold or overbought on any coin
+        indicators = history.get_all_indicators([s for s in TOKENS if s not in {"USDC","USDT","DAI"}])
+        for sym, ind in indicators.items():
+            rsi = ind.get("rsi_14")
+            if rsi and (rsi <= 30 or rsi >= 70):
+                return True
+
+        return False
+
     def run_once(self):
         logger.info("Agent tick: fetching portfolio snapshot...")
         snapshot = self.portfolio.get_snapshot()
@@ -322,11 +352,16 @@ class TradingAgent:
 
         market_context = self._build_market_prompt(snapshot)
 
+        # Two-tier model: Haiku for quiet markets, Sonnet when signals are active
+        active = self._is_market_active(snapshot)
+        model = "claude-sonnet-4-6" if active else "claude-haiku-4-5-20251001"
+        logger.info(f"Using model: {model} (market active: {active})")
+
         messages = [{"role": "user", "content": market_context}]
 
         response = self.client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=4096,
+            model=model,
+            max_tokens=2048 if not active else 4096,
             system=SYSTEM_PROMPT,
             tools=TOOLS,
             messages=messages,
@@ -348,6 +383,7 @@ class TradingAgent:
             messages.append({"role": "assistant", "content": response.content})
             messages.append({"role": "user", "content": tool_results})
 
+            # Always use Sonnet for tool follow-ups (needs full reasoning)
             response = self.client.messages.create(
                 model="claude-sonnet-4-6",
                 max_tokens=4096,
