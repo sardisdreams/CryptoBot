@@ -7,6 +7,8 @@ from bot.portfolio import Portfolio
 from bot.executor import Executor
 from bot.logger import setup_logger
 from bot import history, wiki
+from bot.screener import get_screening_report
+from bot.evaluator import score_coin, format_report
 
 logger = setup_logger("agent")
 
@@ -25,33 +27,63 @@ def _read_notes() -> list[str]:
 
 SYSTEM_PROMPT = """You are an autonomous crypto trading agent operating on the Base blockchain.
 
-Your goal is to grow the total USD value of the portfolio in an aggressive but safe way.
+Your goal is to grow total USD portfolio value aggressively but safely, targeting 10%+ returns.
+BTC and ETH alone are not enough for this — the real opportunities are in Base-native low/mid cap tokens ($5M–$500M market cap).
 
-## Strategy guidelines (use your judgment — these are not rigid rules)
-- USDC is home base. After taking profits or closing a position, always sell back to USDC.
-- Be aggressive when there is conviction. Be cautious when conditions are unclear. When in doubt, stay in USDC.
-- Micro trades are encouraged — small opportunistic positions are fine.
-- Keep at least 50% of the portfolio in USDC at all times as a stability floor.
-- Never let ETH balance drop below 0.005 ETH — this is needed for gas.
-- No borrowing. Spot trading only.
-- Preserve capital first, grow second.
+## Strategy
+- **Primary targets:** Base-native coins with real projects, growing TVL/activity, and upcoming catalysts
+- **ETH/cbBTC:** Secondary — hold as safe harbor only when no better opportunities exist
+- **USDC:** Keep at least 30% as reserve. Always cycle profits back to USDC after a trade closes.
+- **Position sizing:** 5–15% per low-cap coin. Never over-concentrate.
+- **Always keep 0.005 ETH minimum for gas.**
 
-## Token safety — critical
-- ONLY trade tokens that are in the approved whitelist. Never trade unknown or unlisted tokens.
-- Be very suspicious of any token showing sudden large price movements with no clear catalyst.
-- Pump-and-dump warning signs: sudden volume spike, price surge on a low-cap or new token, no legitimate project behind it.
-- Legitimate tokens have: an established website, an active Twitter/X account, at least 6 months of history, real liquidity, and a clear project.
-- If a token's price moves more than 20% in a single tick with no obvious reason, treat it as suspicious — stay in USDC.
-- When in doubt about a token's legitimacy, do not trade it. Capital preservation beats missing an opportunity.
+## Finding opportunities
+Each tick you receive:
+- Base ecosystem coins with market caps, price momentum, and volume
+- Top 24h gainers across all crypto
+- DeFiLlama Base protocols with TVL changes
+- Technical indicators (RSI, SMA, momentum) for whitelisted coins
+- Fear & Greed index and trending tokens
 
-## How to trade
-- You will receive a portfolio snapshot and live market prices each tick.
-- Analyze price levels, portfolio allocations, and any patterns you observe.
-- If you see an opportunity, use the execute_swap tool. You may call it multiple times.
-- If conditions are uncertain or no clear opportunity exists, do nothing and explain why.
-- Always reason step by step before acting."""
+Look for:
+- Rising TVL + rising price = genuine adoption signal
+- RSI <30 on a solid project = oversold buying opportunity
+- Upcoming catalysts mentioned in analyst notes
+- Low-cap coins with strong volume relative to market cap (real interest, not pumped)
+
+## Before trading a new coin
+Use the evaluate_coin tool with the CoinGecko ID to get a safety score.
+Only recommend adding a coin to the whitelist if it scores 50+ and has no critical flags.
+You cannot trade coins not in the approved whitelist — but you CAN recommend new ones for review.
+
+## Pump and dump protection
+- Sudden >20% spike with no news or catalyst = likely pump, avoid
+- Volume/market cap ratio >5x = suspicious
+- Trending on CoinGecko with no fundamentals = warning sign
+- Token under 3 months old = skip
+
+## Token safety
+- ONLY trade whitelisted tokens
+- If something looks too good to be true, evaluate it first with evaluate_coin
+- Capital preservation beats FOMO
+
+Always reason step by step before acting."""
 
 TOOLS = [
+    {
+        "name": "evaluate_coin",
+        "description": "Run a safety and risk evaluation on a coin using its CoinGecko ID. Use this before recommending any new token for the watchlist or whitelist.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "cg_id": {
+                    "type": "string",
+                    "description": "The CoinGecko coin ID (e.g. 'ethereum', 'venice-token')",
+                },
+            },
+            "required": ["cg_id"],
+        },
+    },
     {
         "name": "execute_swap",
         "description": "Execute a token swap on Uniswap V3 on Base chain.",
@@ -170,6 +202,34 @@ class TradingAgent:
             ", ".join(TOKENS.keys()),
         ]
 
+        # Base ecosystem discovery
+        base_coins = snapshot.get("base_ecosystem", [])
+        if base_coins:
+            lines += ["", "Base ecosystem coins ($5M–$500M market cap, sorted by volume):"]
+            for c in base_coins[:10]:
+                lines.append(
+                    f"  {c['symbol']} ({c['name']}): ${c['price']:.4f} | "
+                    f"mcap ${c['market_cap']/1e6:.1f}M | "
+                    f"1h {c['change_1h']:+.1f}% | 24h {c['change_24h']:+.1f}% | "
+                    f"vol ${c['volume_24h']/1e3:.0f}K | cgid: {c['cg_id']}"
+                )
+
+        gainers = snapshot.get("top_gainers", [])
+        if gainers:
+            lines += ["", "Top 24h gainers (cross-market — investigate before acting):"]
+            for g in gainers[:5]:
+                lines.append(f"  {g['symbol']} ({g['name']}): {g['change']:+.1f}% | vol ${g['volume']/1e3:.0f}K")
+
+        defillama = snapshot.get("defillama_base", [])
+        if defillama:
+            lines += ["", "Base DeFi protocols by TVL change (rising TVL = growing adoption):"]
+            for p in defillama[:8]:
+                sym = f" ({p['symbol']})" if p.get("symbol") else ""
+                lines.append(
+                    f"  {p['name']}{sym}: TVL ${p['tvl']/1e6:.1f}M | "
+                    f"1d change {p.get('change_1d', 0):+.1f}%"
+                )
+
         # Coin wiki summaries
         wiki_text = wiki.get_all_summaries(list(TOKENS.keys()))
         if wiki_text:
@@ -183,6 +243,14 @@ class TradingAgent:
                 lines.append(f"  {w.get('symbol')} ({w.get('name')}) — Risk: {w.get('risk')} — {w.get('contract', 'no contract yet')}")
 
         return "\n".join(lines)
+
+    def _handle_tool(self, tool_name: str, tool_input: dict, snapshot: dict) -> str:
+        if tool_name == "evaluate_coin":
+            cg_id = tool_input.get("cg_id", "")
+            logger.info(f"Evaluating coin: {cg_id}")
+            evaluation = score_coin(cg_id)
+            return format_report(evaluation)
+        return self._execute_tool(tool_input, snapshot)
 
     def _execute_tool(self, tool_input: dict, snapshot: dict) -> str:
         token_in_sym = tool_input["token_in"].upper()
@@ -246,6 +314,12 @@ class TradingAgent:
         # Record prices to build up history for technical indicators
         history.record_prices(context["prices"])
 
+        # Discover new opportunities
+        screening = get_screening_report()
+        snapshot["base_ecosystem"] = screening.get("base_ecosystem", [])
+        snapshot["top_gainers"] = screening.get("top_gainers_24h", [])
+        snapshot["defillama_base"] = screening.get("defillama_base", [])
+
         market_context = self._build_market_prompt(snapshot)
 
         messages = [{"role": "user", "content": market_context}]
@@ -263,7 +337,7 @@ class TradingAgent:
             tool_results = []
             for block in response.content:
                 if block.type == "tool_use":
-                    result = self._execute_tool(block.input, snapshot)
+                    result = self._handle_tool(block.name, block.input, snapshot)
                     logger.info(f"Tool result: {result}")
                     tool_results.append({
                         "type": "tool_result",
