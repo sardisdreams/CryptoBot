@@ -76,18 +76,25 @@ class Executor:
         )
 
     def get_quote(self, token_in: str, token_out: str, amount_in_wei: int, fee: int = DEFAULT_FEE) -> int:
-        try:
-            result = self.quoter.functions.quoteExactInputSingle({
-                "tokenIn": Web3.to_checksum_address(token_in),
-                "tokenOut": Web3.to_checksum_address(token_out),
-                "amountIn": amount_in_wei,
-                "fee": fee,
-                "sqrtPriceLimitX96": 0,
-            }).call()
-            return result[0]
-        except Exception as e:
-            logger.error(f"Quote failed: {e}")
-            return 0
+        # Try the requested fee tier first, then fall back to others
+        fee_tiers = [fee] + [f for f in [500, 3000, 10000] if f != fee]
+        for f in fee_tiers:
+            try:
+                result = self.quoter.functions.quoteExactInputSingle({
+                    "tokenIn": Web3.to_checksum_address(token_in),
+                    "tokenOut": Web3.to_checksum_address(token_out),
+                    "amountIn": amount_in_wei,
+                    "fee": f,
+                    "sqrtPriceLimitX96": 0,
+                }).call({"from": self.wallet.address})
+                if result[0] > 0:
+                    if f != fee:
+                        logger.info(f"Quote succeeded on fee tier {f}")
+                    return result[0]
+            except Exception:
+                continue
+        logger.error(f"Quote failed on all fee tiers for {token_in} -> {token_out}")
+        return 0
 
     def _ensure_approval(self, token_address: str, amount_wei: int):
         """Approve the router to spend ERC-20 tokens if allowance is insufficient."""

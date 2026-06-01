@@ -1,6 +1,13 @@
 import logging
 import os
+import sys
 import colorlog
+
+# Fix Windows terminal Unicode issues
+if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if sys.stderr.encoding and sys.stderr.encoding.lower() != "utf-8":
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 def setup_logger(name: str = "cryptobot") -> logging.Logger:
     os.makedirs("logs", exist_ok=True)

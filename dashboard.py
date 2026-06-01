@@ -131,6 +131,28 @@ HTML = """
     </div>
   </div>
 
+  <!-- Holdings -->
+  <div class="section">
+    <h2>Current Holdings</h2>
+    <table>
+      <tr>
+        <th>Token</th><th>Balance</th><th>Price</th><th>Value (USD)</th><th>% of Portfolio</th><th>Role</th>
+      </tr>
+      {% for symbol, h in stats.balances.items() %}
+      {% if h.balance > 0.000001 %}
+      <tr>
+        <td><strong>{{ symbol }}</strong></td>
+        <td>{{ "%.6f"|format(h.balance) }}</td>
+        <td>${{ "%.4f"|format(h.price) }}</td>
+        <td>${{ "%.2f"|format(h.value_usd) }}</td>
+        <td>{{ "%.1f"|format((h.value_usd / stats.portfolio_usd * 100) if stats.portfolio_usd > 0 else 0) }}%</td>
+        <td>{{ "Gas reserve" if h.is_gas else ("Primary reserve" if symbol == "USDC" else "Position") }}</td>
+      </tr>
+      {% endif %}
+      {% endfor %}
+    </table>
+  </div>
+
   <!-- Open Positions -->
   <div class="section">
     <h2>Open Positions</h2>
@@ -249,6 +271,9 @@ ERC20_ABI = [{"inputs": [{"name": "account", "type": "address"}],
               "name": "balanceOf", "outputs": [{"name": "", "type": "uint256"}],
               "stateMutability": "view", "type": "function"}]
 
+import logging
+_log = logging.getLogger("dashboard")
+
 def _get_full_balances(w3, wallet_address: str, prices: dict) -> dict:
     """Return balances and USD values for all tokens including USDC."""
     balances = {}
@@ -257,10 +282,12 @@ def _get_full_balances(w3, wallet_address: str, prices: dict) -> dict:
     # Native ETH (gas only)
     try:
         eth_bal = float(Web3.from_wei(w3.eth.get_balance(wallet_address), "ether"))
-    except Exception:
+    except Exception as e:
+        _log.error(f"ETH balance failed: {e}")
         eth_bal = 0.0
-    eth_usd = eth_bal * prices.get("WETH", 0)
-    balances["ETH"] = {"balance": eth_bal, "value_usd": eth_usd, "is_gas": True}
+    eth_price = prices.get("WETH", 0) or prices.get("ETH", 0)
+    eth_usd = eth_bal * eth_price
+    balances["ETH"] = {"balance": eth_bal, "value_usd": eth_usd, "is_gas": True, "price": eth_price}
     total_usd += eth_usd
 
     # ERC-20 tokens
@@ -273,11 +300,15 @@ def _get_full_balances(w3, wallet_address: str, prices: dict) -> dict:
             )
             raw = contract.functions.balanceOf(wallet_address).call()
             bal = raw / (10 ** info["decimals"])
-            val = bal * prices.get(symbol, 0)
-            balances[symbol] = {"balance": bal, "value_usd": val, "is_gas": False}
+            # Stablecoins always $1
+            price = 1.0 if symbol in {"USDC", "USDT", "DAI"} else prices.get(symbol, 0)
+            val = bal * price
+            balances[symbol] = {"balance": bal, "value_usd": val, "is_gas": False, "price": price}
             total_usd += val
-        except Exception:
-            balances[symbol] = {"balance": 0.0, "value_usd": 0.0, "is_gas": False}
+            _log.info(f"Balance {symbol}: {bal:.4f} (${val:.2f})")
+        except Exception as e:
+            _log.error(f"Balance failed for {symbol}: {e}")
+            balances[symbol] = {"balance": 0.0, "value_usd": 0.0, "is_gas": False, "price": 0.0}
 
     balances["_total_usd"] = total_usd
     return balances
