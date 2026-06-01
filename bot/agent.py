@@ -615,7 +615,8 @@ class TradingAgent:
         cost = (input_tokens * ir + output_tokens * or_) / 1_000_000
         logger.info(f"Tokens: {input_tokens} in / {output_tokens} out | Est. cost: ${cost:.4f}")
 
-        # Log final reasoning
+        # Log final reasoning — strip emoji that crash Windows cp1252 terminal
         for block in response.content:
             if hasattr(block, "text"):
-                logger.info(f"Agent reasoning: {block.text}")
+                safe = block.text.encode("ascii", errors="replace").decode("ascii")
+                logger.info(f"Agent reasoning: {safe}")
