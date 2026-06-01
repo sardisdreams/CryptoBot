@@ -54,4 +54,15 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    RESTART_DELAY = 30  # seconds to wait before restarting after a crash
+    while True:
+        try:
+            main()
+        except SystemExit:
+            break  # intentional exit — don't restart
+        except KeyboardInterrupt:
+            logger.info("Bot stopped by user.")
+            break
+        except Exception as e:
+            logger.error(f"Bot crashed: {e} — restarting in {RESTART_DELAY}s...")
+            time.sleep(RESTART_DELAY)
