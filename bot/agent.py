@@ -268,45 +268,39 @@ class TradingAgent:
             ", ".join(TOKENS.keys()),
         ]
 
-        # Base ecosystem discovery
+        # Top 5 Base ecosystem movers only (sorted by abs 1h change)
         base_coins = snapshot.get("base_ecosystem", [])
         if base_coins:
-            lines += ["", "Base ecosystem coins ($5M–$500M market cap, sorted by volume):"]
-            for c in base_coins[:10]:
+            top5 = sorted(base_coins, key=lambda c: abs(c.get("change_1h", 0)), reverse=True)[:5]
+            lines += ["", "Top Base movers (1h):"]
+            for c in top5:
                 lines.append(
-                    f"  {c['symbol']} ({c['name']}): ${c['price']:.4f} | "
-                    f"mcap ${c['market_cap']/1e6:.1f}M | "
+                    f"  {c['symbol']}: ${c['price']:.4f} | "
                     f"1h {c['change_1h']:+.1f}% | 24h {c['change_24h']:+.1f}% | "
-                    f"vol ${c['volume_24h']/1e3:.0f}K | cgid: {c['cg_id']}"
+                    f"mcap ${c['market_cap']/1e6:.0f}M | cgid:{c['cg_id']}"
                 )
 
         gainers = snapshot.get("top_gainers", [])
         if gainers:
-            lines += ["", "Top 24h gainers (cross-market — investigate before acting):"]
-            for g in gainers[:5]:
-                lines.append(f"  {g['symbol']} ({g['name']}): {g['change']:+.1f}% | vol ${g['volume']/1e3:.0f}K")
+            lines += ["", "Top gainers (24h):"]
+            for g in gainers[:3]:
+                lines.append(f"  {g['symbol']}: {g['change']:+.1f}% | cgid:{g['cg_id']}")
 
+        # DeFiLlama — top 5 Base protocols with biggest TVL change only
         defillama = snapshot.get("defillama_base", [])
         if defillama:
-            lines += ["", "Base DeFi protocols by TVL change (rising TVL = growing adoption):"]
-            for p in defillama[:8]:
-                sym = f" ({p['symbol']})" if p.get("symbol") else ""
-                lines.append(
-                    f"  {p['name']}{sym}: TVL ${p['tvl']/1e6:.1f}M | "
-                    f"1d change {p.get('change_1d', 0):+.1f}%"
-                )
+            top_tvl = [p for p in defillama if p.get("symbol") and abs(p.get("change_1d") or 0) > 2][:5]
+            if top_tvl:
+                lines += ["", "Base protocols with significant TVL change:"]
+                for p in top_tvl:
+                    lines.append(f"  {p['name']} ({p['symbol']}): TVL ${p['tvl']/1e6:.0f}M | {p.get('change_1d', 0):+.1f}%")
 
-        # Coin wiki summaries
-        wiki_text = wiki.get_all_summaries(list(TOKENS.keys()))
-        if wiki_text:
-            lines += ["", "=== COIN WIKI (research & trading notes) ===", wiki_text]
-
-        # Watchlist tokens (not tradeable yet but worth noting)
-        watchlist = wiki.get_watchlist()
-        if watchlist:
-            lines += ["", "Watchlist tokens (NOT tradeable — under review):"]
-            for w in watchlist:
-                lines.append(f"  {w.get('symbol')} ({w.get('name')}) — Risk: {w.get('risk')} — {w.get('contract', 'no contract yet')}")
+        # Wiki only for tokens currently held (not entire registry)
+        held_symbols = [sym for sym, h in snapshot.get("holdings", {}).items() if h.get("balance", 0) > 0.000001 and sym not in {"USDC","USDT","DAI","ETH"}]
+        if held_symbols:
+            wiki_text = wiki.get_all_summaries(held_symbols)
+            if wiki_text:
+                lines += ["", "Wiki for held tokens:", wiki_text]
 
         return "\n".join(lines)
 
@@ -605,6 +599,16 @@ class TradingAgent:
                 tools=TOOLS,
                 messages=messages,
             )
+
+        # Log token usage and estimated cost
+        usage = response.usage
+        input_tokens  = usage.input_tokens
+        output_tokens = usage.output_tokens
+        # Sonnet: $3/M input, $15/M output | Haiku: $0.25/M input, $1.25/M output
+        rates = {"claude-sonnet-4-6": (3.0, 15.0), "claude-haiku-4-5-20251001": (0.25, 1.25)}
+        ir, or_ = rates.get(model, (3.0, 15.0))
+        cost = (input_tokens * ir + output_tokens * or_) / 1_000_000
+        logger.info(f"Tokens: {input_tokens} in / {output_tokens} out | Est. cost: ${cost:.4f}")
 
         # Log final reasoning
         for block in response.content:
