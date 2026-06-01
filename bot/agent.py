@@ -6,7 +6,7 @@ from bot.config import ANTHROPIC_API_KEY, TOKENS
 from bot.portfolio import Portfolio
 from bot.executor import Executor
 from bot.logger import setup_logger
-from bot import history
+from bot import history, wiki
 
 logger = setup_logger("agent")
 
@@ -169,6 +169,19 @@ class TradingAgent:
             "Approved tokens for trading (whitelist only):",
             ", ".join(TOKENS.keys()),
         ]
+
+        # Coin wiki summaries
+        wiki_text = wiki.get_all_summaries(list(TOKENS.keys()))
+        if wiki_text:
+            lines += ["", "=== COIN WIKI (research & trading notes) ===", wiki_text]
+
+        # Watchlist tokens (not tradeable yet but worth noting)
+        watchlist = wiki.get_watchlist()
+        if watchlist:
+            lines += ["", "Watchlist tokens (NOT tradeable — under review):"]
+            for w in watchlist:
+                lines.append(f"  {w.get('symbol')} ({w.get('name')}) — Risk: {w.get('risk')} — {w.get('contract', 'no contract yet')}")
+
         return "\n".join(lines)
 
     def _execute_tool(self, tool_input: dict, snapshot: dict) -> str:
