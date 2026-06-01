@@ -506,21 +506,23 @@ class TradingAgent:
             logger.info("Market active: extreme Fear/Greed")
             return True
 
-        # Escalate if any whitelisted coin moved >3% in 1h
+        # Escalate if any whitelisted coin moved >5% in 1h (raised from 3%)
         for sym, d in market_data.items():
-            if abs(d.get("change_1h", 0)) >= 3:
+            if abs(d.get("change_1h", 0)) >= 5:
                 logger.info(f"Market active: {sym} moved {d['change_1h']:+.1f}% in 1h")
                 return True
 
-        # Escalate if screener found meaningful gainers (>5% in 24h)
+        # Escalate if screener found meaningful gainers (>8% in 24h)
         for coin in snapshot.get("top_gainers", []):
-            if abs(coin.get("change", 0)) >= 5:
-                logger.info(f"Market active: screener found {coin['symbol']} up {coin['change']:+.1f}%")
+            chg = coin.get("change_24h", coin.get("change", 0))
+            if abs(chg) >= 8:
+                logger.info(f"Market active: screener found {coin['symbol']} {chg:+.1f}%")
                 return True
 
-        # Escalate if analyst notes are present
-        if _read_notes():
-            logger.info("Market active: analyst notes present")
+        # Escalate only on URGENT notes (prefix line with [URGENT])
+        urgent = [n for n in _read_notes() if n.upper().startswith("[URGENT]")]
+        if urgent:
+            logger.info(f"Market active: urgent analyst note")
             return True
 
         # Escalate if RSI is oversold or overbought on any coin
