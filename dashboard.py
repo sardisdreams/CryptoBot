@@ -3,7 +3,7 @@ import os
 import csv
 import json
 from datetime import datetime, timezone
-from flask import Flask, render_template_string, jsonify
+from flask import Flask, render_template_string, jsonify, request, redirect
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -16,6 +16,8 @@ from bot.portfolio import Portfolio
 from bot.wallet import Wallet
 from bot.positions import get_position_summary, get_realized_summary
 from bot.config import BASE_RPC_URL, PRIVATE_KEY, TOKENS
+from bot.blacklist import block, unblock, get_all as get_blacklist
+from flask import Flask, render_template_string, jsonify, request, redirect, request, redirect
 from web3 import Web3
 import certifi, requests as req
 
@@ -129,6 +131,54 @@ HTML = """
       </div>
       <div class="sub">{{ "⚠️ LOW — top up needed" if stats.eth_balance < 0.005 else "Base network gas" }}</div>
     </div>
+  </div>
+
+  <!-- Token Watchlist -->
+  <div class="section">
+    <h2>Token Watchlist — Base Ecosystem (last screener scan)</h2>
+    {% if watchlist %}
+    <table>
+      <tr>
+        <th>Token</th><th>Price</th><th>1h</th><th>24h</th>
+        <th>Market Cap</th><th>Volume 24h</th><th>Status</th><th>Action</th>
+      </tr>
+      {% for c in watchlist %}
+      <tr style="{{ 'opacity:0.4' if c.blocked else '' }}">
+        <td><strong>{{ c.symbol }}</strong><br><span style="color:#64748b;font-size:0.75rem">{{ c.name }}</span></td>
+        <td>${{ "%.4f"|format(c.price|float) }}</td>
+        <td class="{{ 'pos' if c.change_1h|float >= 0 else 'neg' }}">{{ "%+.2f"|format(c.change_1h|float) }}%</td>
+        <td class="{{ 'pos' if c.change_24h|float >= 0 else 'neg' }}">{{ "%+.2f"|format(c.change_24h|float) }}%</td>
+        <td>${{ "%.1fM"|format(c.market_cap|float / 1e6) }}</td>
+        <td>${{ "%.0fK"|format(c.volume_24h|float / 1e3) }}</td>
+        <td>
+          {% if c.blocked %}
+          <span class="pill short">Blocked</span>
+          {% else %}
+          <span class="pill open">Active</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if c.blocked %}
+          <form method="POST" action="/unblock" style="display:inline">
+            <input type="hidden" name="symbol" value="{{ c.symbol }}">
+            <button type="submit" style="background:#22c55e22;color:#22c55e;border:1px solid #22c55e44;
+              padding:4px 12px;border-radius:6px;cursor:pointer;font-size:0.8rem">Unblock</button>
+          </form>
+          {% else %}
+          <form method="POST" action="/block" style="display:inline">
+            <input type="hidden" name="symbol" value="{{ c.symbol }}">
+            <input type="hidden" name="cg_id"  value="{{ c.cg_id }}">
+            <button type="submit" style="background:#ef444422;color:#ef4444;border:1px solid #ef444444;
+              padding:4px 12px;border-radius:6px;cursor:pointer;font-size:0.8rem">Block</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% else %}
+    <div class="empty">No screener data yet — will populate after first bot tick</div>
+    {% endif %}
   </div>
 
   <!-- Holdings -->
@@ -332,6 +382,36 @@ def index():
     closed     = _load_csv("records/realized_gains.csv")
     txns       = list(reversed(_load_csv("records/transactions.csv")))
 
+    # Load screener cache + blacklist for watchlist UI
+    bl = get_blacklist()
+    blocked_syms = set(bl.get("symbols", []))
+    watchlist = []
+    if os.path.exists("data/screener_cache.json"):
+        with open("data/screener_cache.json") as _f:
+            cache = json.load(_f)
+        all_coins = cache.get("base_ecosystem", []) + [
+            c for c in cache.get("top_gainers", [])
+            if c.get("symbol") not in {x.get("symbol") for x in cache.get("base_ecosystem", [])}
+        ]
+        seen = set()
+        for c in all_coins:
+            sym = c.get("symbol", "").upper()
+            if sym in seen:
+                continue
+            seen.add(sym)
+            watchlist.append({
+                "symbol":     sym,
+                "name":       c.get("name", ""),
+                "price":      c.get("price", 0),
+                "change_1h":  c.get("change_1h", 0),
+                "change_24h": c.get("change_24h", c.get("change", 0)),
+                "market_cap": c.get("market_cap", 0),
+                "volume_24h": c.get("volume_24h", c.get("volume", 0)),
+                "cg_id":      c.get("cg_id", ""),
+                "blocked":    sym in blocked_syms,
+            })
+        watchlist.sort(key=lambda x: (x["blocked"], -x["change_24h"]))
+
     unrealized  = sum(p["gain_loss_usd"] for p in open_pos)
     usdc_bal    = balances.get("USDC", {}).get("balance", 0.0)
     usdc_usd    = balances.get("USDC", {}).get("value_usd", 0.0)
@@ -361,7 +441,25 @@ def index():
         open_positions=open_pos,
         closed_trades=list(reversed(closed)),
         transactions=txns,
+        watchlist=watchlist,
     )
+
+
+@app.route("/block", methods=["POST"])
+def block_token():
+    symbol = request.form.get("symbol", "").upper()
+    cg_id  = request.form.get("cg_id", "")
+    if symbol:
+        block(symbol, cg_id, reason="User blocked via dashboard")
+    return redirect("/")
+
+
+@app.route("/unblock", methods=["POST"])
+def unblock_token():
+    symbol = request.form.get("symbol", "").upper()
+    if symbol:
+        unblock(symbol)
+    return redirect("/")
 
 
 @app.route("/api/summary")

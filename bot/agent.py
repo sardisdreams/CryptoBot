@@ -6,7 +6,7 @@ from bot.config import ANTHROPIC_API_KEY, TOKENS, MAX_DEPLOY_USD, MIN_TRADE_USD,
 from bot.portfolio import Portfolio
 from bot.executor import Executor
 from bot.logger import setup_logger
-from bot import history, wiki, positions
+from bot import history, wiki, positions, blacklist
 from bot.screener import get_screening_report
 from bot.evaluator import score_coin, format_report
 
@@ -389,6 +389,10 @@ class TradingAgent:
         amount_tokens = amount_usd / price_in
         amount_wei = int(amount_tokens * (10 ** token_in["decimals"]))
 
+        # Check blacklist
+        if blacklist.is_blocked(token_out_sym):
+            return f"{token_out_sym} is on your block list — trade cancelled"
+
         # Enforce minimum trade size
         if amount_usd < MIN_TRADE_USD:
             return f"Trade too small: ${amount_usd:.2f} is below minimum ${MIN_TRADE_USD:.2f} (gas not worth it)"
@@ -496,9 +500,26 @@ class TradingAgent:
 
         # Discover new opportunities
         screening = get_screening_report()
-        snapshot["base_ecosystem"] = screening.get("base_ecosystem", [])
-        snapshot["top_gainers"] = screening.get("top_gainers_24h", [])
+
+        # Filter out blacklisted tokens
+        def not_blocked(coin: dict) -> bool:
+            return not blacklist.is_blocked(
+                coin.get("symbol", ""), coin.get("cg_id", "")
+            )
+
+        snapshot["base_ecosystem"] = [c for c in screening.get("base_ecosystem", []) if not_blocked(c)]
+        snapshot["top_gainers"]    = [c for c in screening.get("top_gainers_24h", []) if not_blocked(c)]
         snapshot["defillama_base"] = screening.get("defillama_base", [])
+
+        # Cache screener results for the dashboard
+        import json
+        os.makedirs("data", exist_ok=True)
+        with open("data/screener_cache.json", "w") as _f:
+            json.dump({
+                "base_ecosystem": screening.get("base_ecosystem", []),
+                "top_gainers":    screening.get("top_gainers_24h", []),
+                "updated":        __import__("datetime").datetime.utcnow().isoformat(),
+            }, _f)
 
         market_context = self._build_market_prompt(snapshot)
 
