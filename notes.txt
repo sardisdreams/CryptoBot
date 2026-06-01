@@ -1,0 +1,7 @@
+# Catalyst Notes
+# Add any upcoming events, news, or observations here.
+# The agent reads this file every tick.
+# Lines starting with # are ignored.
+# Example:
+#   VVV reducing emissions tomorrow — potential buy opportunity
+#   ETH ETF decision expected Friday

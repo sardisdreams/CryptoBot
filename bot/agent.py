@@ -1,3 +1,4 @@
+import os
 import httpx
 import certifi
 import anthropic
@@ -5,8 +6,22 @@ from bot.config import ANTHROPIC_API_KEY, TOKENS
 from bot.portfolio import Portfolio
 from bot.executor import Executor
 from bot.logger import setup_logger
+from bot import history
 
 logger = setup_logger("agent")
+
+NOTES_FILE = "notes.txt"
+
+def _read_notes() -> list[str]:
+    if not os.path.exists(NOTES_FILE):
+        return []
+    lines = []
+    with open(NOTES_FILE) as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith("#"):
+                lines.append(line)
+    return lines
 
 SYSTEM_PROMPT = """You are an autonomous crypto trading agent operating on the Base blockchain.
 
@@ -107,6 +122,48 @@ class TradingAgent:
                 rank = t.get("market_cap_rank") or "unranked"
                 lines.append(f"  {t['symbol']} ({t['name']}) — market cap rank: {rank}")
 
+        # Technical indicators from price history
+        crypto_symbols = [s for s in TOKENS if s not in {"USDC", "USDT", "DAI"}]
+        indicators = history.get_all_indicators(crypto_symbols)
+        lines += ["", "Technical indicators (from stored price history):"]
+        for sym, ind in indicators.items():
+            n = ind["data_points"]
+            if n < 2:
+                lines.append(f"  {sym}: insufficient history ({n} data points — building up)")
+                continue
+            rsi = f"RSI={ind['rsi_14']}" if ind["rsi_14"] else "RSI=n/a"
+            trend = ind["trend"] or "n/a"
+            m1h = f"{ind['momentum_1h_pct']:+.2f}%" if ind["momentum_1h_pct"] is not None else "n/a"
+            m4h = f"{ind['momentum_4h_pct']:+.2f}%" if ind["momentum_4h_pct"] is not None else "n/a"
+            lines.append(f"  {sym}: {rsi} | trend={trend} | 1h={m1h} | 4h={m4h} ({n} pts)")
+
+        # Market momentum from CoinGecko (1h/24h change)
+        market_data = snapshot.get("market_data", {})
+        if market_data:
+            lines += ["", "Live price momentum (from CoinGecko):"]
+            for sym, d in market_data.items():
+                if sym in {"USDC", "USDT", "DAI"}:
+                    continue
+                lines.append(
+                    f"  {sym}: 1h {d.get('change_1h', 0):+.2f}% | "
+                    f"24h {d.get('change_24h', 0):+.2f}% | "
+                    f"24h range ${d.get('low_24h', 0):,.0f}–${d.get('high_24h', 0):,.0f}"
+                )
+
+        # Aerodrome top pools
+        pools = snapshot.get("aerodrome_pools", [])
+        if pools:
+            lines += ["", "Top Aerodrome pools by volume (Base DEX activity):"]
+            for p in pools[:5]:
+                lines.append(f"  {p['pair']}: ${p['volume_usd']:,.0f} volume")
+
+        # Manual catalyst notes
+        notes = _read_notes()
+        if notes:
+            lines += ["", "Analyst notes / upcoming catalysts (from notes.txt):"]
+            for note in notes:
+                lines.append(f"  - {note}")
+
         lines += [
             "",
             "Approved tokens for trading (whitelist only):",
@@ -170,6 +227,12 @@ class TradingAgent:
         context = self.portfolio.market.get_full_context()
         snapshot["fear_and_greed"] = context["fear_and_greed"]
         snapshot["trending_tokens"] = context["trending_tokens"]
+        snapshot["market_data"] = context["market_data"]
+        snapshot["aerodrome_pools"] = context.get("aerodrome_pools", [])
+
+        # Record prices to build up history for technical indicators
+        history.record_prices(context["prices"])
+
         market_context = self._build_market_prompt(snapshot)
 
         messages = [{"role": "user", "content": market_context}]

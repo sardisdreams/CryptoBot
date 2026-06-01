@@ -14,9 +14,9 @@ COINGECKO_IDS = {
     "cbETH": "coinbase-wrapped-staked-eth",
 }
 
-COINGECKO_URL       = "https://api.coingecko.com/api/v3/simple/price"
-FEAR_GREED_URL      = "https://api.alternative.me/fng/"
-COINGECKO_TRENDING  = "https://api.coingecko.com/api/v3/search/trending"
+COINGECKO_MARKETS  = "https://api.coingecko.com/api/v3/coins/markets"
+FEAR_GREED_URL     = "https://api.alternative.me/fng/"
+COINGECKO_TRENDING = "https://api.coingecko.com/api/v3/search/trending"
 
 SSL = certifi.where()
 
@@ -25,53 +25,79 @@ class Market:
     def __init__(self, w3=None):
         self.w3 = w3
 
-    def get_all_prices(self) -> dict[str, float]:
-        ids = ",".join(COINGECKO_IDS.values())
+    def get_market_data(self) -> dict[str, dict]:
+        """
+        Fetch prices + 1h/24h change % + volume for all whitelisted tokens.
+        Uses CoinGecko /coins/markets which returns rich data in one call.
+        """
+        non_stable = {k: v for k, v in COINGECKO_IDS.items() if k not in STABLECOINS}
+        ids = ",".join(non_stable.values())
         try:
-            response = requests.get(
-                COINGECKO_URL,
-                params={"ids": ids, "vs_currencies": "usd"},
+            resp = requests.get(
+                COINGECKO_MARKETS,
+                params={
+                    "vs_currency": "usd",
+                    "ids": ids,
+                    "price_change_percentage": "1h,24h",
+                    "per_page": 20,
+                },
                 timeout=10,
                 verify=SSL,
             )
-            response.raise_for_status()
-            data = response.json()
+            resp.raise_for_status()
+            raw = {coin["id"]: coin for coin in resp.json()}
 
-            prices = {}
-            for symbol in TOKENS:
-                if symbol in STABLECOINS:
-                    prices[symbol] = 1.0
+            result = {}
+            id_to_sym = {v: k for k, v in COINGECKO_IDS.items()}
+
+            for cg_id, coin in raw.items():
+                sym = id_to_sym.get(cg_id)
+                if not sym:
                     continue
-                cg_id = COINGECKO_IDS.get(symbol)
-                if cg_id and cg_id in data:
-                    prices[symbol] = data[cg_id]["usd"]
-                else:
-                    prices[symbol] = 0.0
-                    logger.warning(f"No price data for {symbol}")
+                result[sym] = {
+                    "price":        coin.get("current_price", 0.0),
+                    "change_1h":    coin.get("price_change_percentage_1h_in_currency", 0.0),
+                    "change_24h":   coin.get("price_change_percentage_24h", 0.0),
+                    "volume_24h":   coin.get("total_volume", 0.0),
+                    "market_cap":   coin.get("market_cap", 0.0),
+                    "high_24h":     coin.get("high_24h", 0.0),
+                    "low_24h":      coin.get("low_24h", 0.0),
+                }
 
-            logger.info(f"Prices: { {k: f'${v:,.2f}' for k, v in prices.items()} }")
-            return prices
+            for sym in STABLECOINS:
+                result[sym] = {
+                    "price": 1.0, "change_1h": 0.0, "change_24h": 0.0,
+                    "volume_24h": 0.0, "market_cap": 0.0,
+                    "high_24h": 1.0, "low_24h": 1.0,
+                }
+
+            for sym, d in result.items():
+                if sym not in STABLECOINS:
+                    logger.info(
+                        f"{sym}: ${d['price']:,.2f} | "
+                        f"1h: {d['change_1h']:+.2f}% | "
+                        f"24h: {d['change_24h']:+.2f}% | "
+                        f"vol: ${d['volume_24h']:,.0f}"
+                    )
+            return result
 
         except Exception as e:
-            logger.error(f"Price fetch failed: {e}")
-            return {symbol: 0.0 for symbol in TOKENS}
+            logger.error(f"Market data fetch failed: {e}")
+            return {}
+
+    def get_all_prices(self) -> dict[str, float]:
+        data = self.get_market_data()
+        return {sym: d["price"] for sym, d in data.items()} if data else {sym: 0.0 for sym in TOKENS}
 
     def get_price_usd(self, symbol: str) -> float:
         return self.get_all_prices().get(symbol.upper(), 0.0)
 
     def get_fear_and_greed(self) -> dict:
-        """
-        Returns the Crypto Fear & Greed Index.
-        Value 0-100: 0=Extreme Fear, 50=Neutral, 100=Extreme Greed.
-        """
         try:
-            response = requests.get(FEAR_GREED_URL, timeout=10, verify=SSL)
-            response.raise_for_status()
-            data = response.json()["data"][0]
-            result = {
-                "value": int(data["value"]),
-                "label": data["value_classification"],  # e.g. "Fear", "Greed", "Extreme Greed"
-            }
+            resp = requests.get(FEAR_GREED_URL, timeout=10, verify=SSL)
+            resp.raise_for_status()
+            data = resp.json()["data"][0]
+            result = {"value": int(data["value"]), "label": data["value_classification"]}
             logger.info(f"Fear & Greed: {result['value']} ({result['label']})")
             return result
         except Exception as e:
@@ -79,14 +105,10 @@ class Market:
             return {"value": 50, "label": "Unknown"}
 
     def get_trending_tokens(self) -> list[dict]:
-        """
-        Returns top trending tokens on CoinGecko.
-        Useful for detecting hype / potential pump-and-dump targets to AVOID.
-        """
         try:
-            response = requests.get(COINGECKO_TRENDING, timeout=10, verify=SSL)
-            response.raise_for_status()
-            coins = response.json().get("coins", [])
+            resp = requests.get(COINGECKO_TRENDING, timeout=10, verify=SSL)
+            resp.raise_for_status()
+            coins = resp.json().get("coins", [])
             trending = []
             for item in coins[:7]:
                 coin = item["item"]
@@ -94,7 +116,6 @@ class Market:
                     "name": coin["name"],
                     "symbol": coin["symbol"].upper(),
                     "market_cap_rank": coin.get("market_cap_rank"),
-                    "score": coin.get("score", 0),
                 })
             logger.info(f"Trending: {[t['symbol'] for t in trending]}")
             return trending
@@ -102,10 +123,48 @@ class Market:
             logger.warning(f"Trending fetch failed: {e}")
             return []
 
+    def get_aerodrome_top_pools(self) -> list[dict]:
+        """
+        Fetch top liquidity pools from Aerodrome (Base's main DEX).
+        Shows which tokens have real trading activity on Base specifically.
+        """
+        query = """
+        {
+          pools(first: 10, orderBy: volumeUSD, orderDirection: desc) {
+            token0 { symbol }
+            token1 { symbol }
+            volumeUSD
+            liquidity
+          }
+        }
+        """
+        try:
+            resp = requests.post(
+                "https://api.thegraph.com/subgraphs/name/aerodrome-finance/aerodrome-v2",
+                json={"query": query},
+                timeout=10,
+                verify=SSL,
+            )
+            resp.raise_for_status()
+            pools = resp.json().get("data", {}).get("pools", [])
+            result = []
+            for p in pools:
+                result.append({
+                    "pair": f"{p['token0']['symbol']}/{p['token1']['symbol']}",
+                    "volume_usd": float(p.get("volumeUSD", 0)),
+                })
+            logger.info(f"Aerodrome top pools: {[p['pair'] for p in result[:5]]}")
+            return result
+        except Exception as e:
+            logger.warning(f"Aerodrome pools fetch failed: {e}")
+            return []
+
     def get_full_context(self) -> dict:
-        """Single call that returns prices + fear/greed + trending for the agent."""
+        market_data = self.get_market_data()
         return {
-            "prices": self.get_all_prices(),
-            "fear_and_greed": self.get_fear_and_greed(),
+            "prices":          {sym: d["price"] for sym, d in market_data.items()},
+            "market_data":     market_data,
+            "fear_and_greed":  self.get_fear_and_greed(),
             "trending_tokens": self.get_trending_tokens(),
+            "aerodrome_pools": self.get_aerodrome_top_pools(),
         }

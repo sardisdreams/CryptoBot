@@ -20,7 +20,7 @@ logger = setup_logger("main")
 os.makedirs("logs", exist_ok=True)
 os.makedirs("records", exist_ok=True)
 
-RUN_INTERVAL_SECONDS = 300  # Run agent every 5 minutes
+RUN_INTERVAL_SECONDS = 1800  # Run agent every 30 minutes
 
 
 def main():
