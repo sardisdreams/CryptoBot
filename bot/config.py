@@ -37,8 +37,12 @@ WETH_ADDRESS = TOKENS["WETH"]["address"]
 USDC_ADDRESS = TOKENS["USDC"]["address"]
 
 # Trading parameters
-SLIPPAGE_TOLERANCE = float(os.getenv("SLIPPAGE_TOLERANCE", "0.005"))
+SLIPPAGE_TOLERANCE       = float(os.getenv("SLIPPAGE_TOLERANCE", "0.005"))  # major tokens
+SLIPPAGE_TOLERANCE_LOWCAP = 0.02   # 2% for low-liquidity Base-native tokens
 GAS_LIMIT = 300_000
+
+# High-liquidity tokens that can use tight slippage
+HIGH_LIQUIDITY_TOKENS = {"WETH", "USDC", "USDT", "DAI", "cbBTC", "cbETH"}
 
 # Capital deployment limits
 MAX_DEPLOY_USD = 200.0    # never deploy more than this total across all open positions

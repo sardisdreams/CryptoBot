@@ -2,8 +2,8 @@ import time
 from web3 import Web3
 from bot.config import (
     UNISWAP_V3_ROUTER, UNISWAP_V3_QUOTER,
-    SLIPPAGE_TOLERANCE, GAS_LIMIT, BASE_CHAIN_ID, DEFAULT_FEE, WETH_ADDRESS,
-    STABLECOINS,
+    SLIPPAGE_TOLERANCE, SLIPPAGE_TOLERANCE_LOWCAP, HIGH_LIQUIDITY_TOKENS,
+    GAS_LIMIT, BASE_CHAIN_ID, DEFAULT_FEE, WETH_ADDRESS, STABLECOINS,
 )
 from bot.wallet import Wallet
 from bot.logger import setup_logger
@@ -173,7 +173,9 @@ class Executor:
             if not is_native_eth:
                 self._ensure_approval(token_in_address, amount_in_wei)
 
-            min_out   = int(amount_out * (1 - SLIPPAGE_TOLERANCE))
+            # Use tighter slippage for liquid tokens, wider for low-cap Base tokens
+            slip = SLIPPAGE_TOLERANCE if (token_in_symbol in HIGH_LIQUIDITY_TOKENS and token_out_symbol in HIGH_LIQUIDITY_TOKENS) else SLIPPAGE_TOLERANCE_LOWCAP
+            min_out   = int(amount_out * (1 - slip))
             deadline  = int(time.time()) + 300
             gas_price = self.w3.eth.gas_price
 

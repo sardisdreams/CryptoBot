@@ -2,7 +2,8 @@ import time
 from web3 import Web3
 from bot.config import (
     AERODROME_ROUTER, AERODROME_FACTORY,
-    SLIPPAGE_TOLERANCE, GAS_LIMIT, BASE_CHAIN_ID, WETH_ADDRESS,
+    SLIPPAGE_TOLERANCE, SLIPPAGE_TOLERANCE_LOWCAP, HIGH_LIQUIDITY_TOKENS,
+    GAS_LIMIT, BASE_CHAIN_ID, WETH_ADDRESS,
 )
 from bot.logger import setup_logger
 
@@ -177,7 +178,10 @@ class AerodromeRouter:
         routes: list[dict],
         amount_out: int,
     ) -> str | None:
-        min_out   = int(amount_out * (1 - SLIPPAGE_TOLERANCE))
+        token_in_sym  = token_in.split("/")[-1] if "/" in token_in else token_in
+        token_out_sym = token_out.split("/")[-1] if "/" in token_out else token_out
+        slip = SLIPPAGE_TOLERANCE if (token_in_sym in HIGH_LIQUIDITY_TOKENS and token_out_sym in HIGH_LIQUIDITY_TOKENS) else SLIPPAGE_TOLERANCE_LOWCAP
+        min_out   = int(amount_out * (1 - slip))
         deadline  = int(time.time()) + 300
         gas_price = self.w3.eth.gas_price
         is_native_eth_in  = token_in.lower()  == WETH_ADDRESS.lower()
