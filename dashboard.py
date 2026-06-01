@@ -160,6 +160,8 @@ HTML = """
         <td style="font-size:0.78rem;color:#94a3b8">
           {% if c.blocked %}
             <span style="color:#ef4444">Blocked by you</span>
+          {% elif c.get('liquidity_verified') == false %}
+            <span style="color:#f59e0b">Thin liquidity on Base</span>
           {% elif c.signals %}
             {% for s in c.signals %}<span style="display:block">• {{ s }}</span>{% endfor %}
           {% else %}

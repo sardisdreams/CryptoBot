@@ -9,6 +9,7 @@ from bot.logger import setup_logger
 from bot import history, wiki, positions, blacklist, token_cache
 from bot.screener import get_screening_report
 from bot.evaluator import score_coin, format_report
+from bot.liquidity import filter_liquid_coins
 
 logger = setup_logger("agent")
 
@@ -565,8 +566,14 @@ class TradingAgent:
                 coin.get("symbol", ""), coin.get("cg_id", "")
             )
 
-        snapshot["base_ecosystem"] = [c for c in screening.get("base_ecosystem", []) if not_blocked(c)]
-        snapshot["top_gainers"]    = [c for c in screening.get("top_gainers_24h", []) if not_blocked(c)]
+        base_raw = [c for c in screening.get("base_ecosystem", []) if not_blocked(c)]
+
+        # Filter to tokens with real Base liquidity (cached — only checks each token once/day)
+        w3 = self.portfolio.w3
+        base_liquid = filter_liquid_coins(w3, base_raw, context["prices"])
+
+        snapshot["base_ecosystem"] = base_liquid
+        snapshot["top_gainers"]    = [c for c in screening.get("top_gainers_24h", []) if not_blocked(c) and c.get("liquidity_verified", True)]
         snapshot["defillama_base"] = screening.get("defillama_base", [])
 
         # Cache screener results and build agent watchlist for dashboard
