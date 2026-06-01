@@ -344,7 +344,8 @@ class TradingAgent:
             if not contract:
                 return f"{name}: not found on Base chain. May not be deployed on Base."
             # Save to cache so we never need to call CoinGecko for this token again
-            token_cache.store(cg_id, contract, decimals, name, price)
+            symbol_guess = data.get("symbol", "").upper()
+            token_cache.store(cg_id, contract, decimals, name, price, symbol=symbol_guess)
             return (
                 f"{name} ({cg_id})\n"
                 f"Base contract: {contract}\n"

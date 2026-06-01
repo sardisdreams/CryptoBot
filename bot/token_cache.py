@@ -26,12 +26,13 @@ def get(cg_id: str) -> dict | None:
     return _load().get(cg_id)
 
 
-def store(cg_id: str, address: str, decimals: int, name: str, price: float = 0):
+def store(cg_id: str, address: str, decimals: int, name: str, price: float = 0, symbol: str = ""):
     cache = _load()
     cache[cg_id] = {
         "address":   address,
         "decimals":  decimals,
         "name":      name,
+        "symbol":    symbol.upper() if symbol else name.upper()[:6],
         "price":     price,
         "cached_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     }

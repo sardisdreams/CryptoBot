@@ -97,7 +97,7 @@ HTML = """
 <div class="header">
   <h1>CryptoBot</h1>
   <span class="badge">LIVE</span>
-  <span class="ver">v2.02</span>
+  <span class="ver">v2.03</span>
   <span class="refresh">Auto-refreshes every 60s &nbsp;|&nbsp; {{ stats.wallet_address[:8] }}...{{ stats.wallet_address[-6:] }}</span>
 </div>
 
@@ -446,36 +446,81 @@ def index():
     closed     = _load_csv("records/realized_gains.csv")
     txns       = list(reversed(_load_csv("records/transactions.csv")))
 
-    # Enrich prices with custom token prices from token cache
     from bot.token_cache import list_all as list_token_cache
     tc = list_token_cache()
+
+    # Known CoinGecko IDs for registry tokens
+    KNOWN_CG_IDS = {
+        "WETH":  "ethereum",
+        "cbBTC": "coinbase-wrapped-btc",
+        "cbETH": "coinbase-wrapped-staked-eth",
+        "USDC":  "usd-coin",
+        "USDT":  "tether",
+        "DAI":   "dai",
+        "ETH":   "ethereum",
+    }
+
+    # Build symbol → cg_id map from token cache
+    sym_to_cg = dict(KNOWN_CG_IDS)
+    cg_prices  = {}
     for cg_id, info in tc.items():
-        sym = info.get("name", "").upper()
-        if sym not in prices and info.get("price", 0) > 0:
-            prices[sym] = info["price"]
+        stored_sym = info.get("symbol", "").upper()
+        if stored_sym and stored_sym not in sym_to_cg:
+            sym_to_cg[stored_sym] = cg_id
+        if info.get("price", 0) > 0:
+            cg_prices[stored_sym] = info["price"]
+
+    # Fetch live prices for custom tokens via CoinGecko (IDs we know)
+    custom_ids = [cg_id for sym, cg_id in sym_to_cg.items()
+                  if sym not in prices and cg_id not in ("ethereum","usd-coin","tether","dai",
+                                                          "coinbase-wrapped-btc","coinbase-wrapped-staked-eth")]
+    if custom_ids:
+        try:
+            import time as _t
+            _t.sleep(1)
+            resp = req.get(
+                "https://api.coingecko.com/api/v3/simple/price",
+                params={"ids": ",".join(set(custom_ids)), "vs_currencies": "usd"},
+                timeout=10, verify=certifi.where(),
+            )
+            if resp.status_code == 200:
+                live = resp.json()
+                for sym, cg_id in sym_to_cg.items():
+                    if cg_id in live:
+                        prices[sym] = live[cg_id]["usd"]
+        except Exception:
+            pass
+
+    # Fill remaining from cache
+    for sym, p in cg_prices.items():
+        if sym not in prices:
+            prices[sym] = p
 
     open_pos = get_position_summary(prices)
 
     # Add CoinGecko ID and URL to each open position
     for p in open_pos:
-        sym = p["symbol"]
-        cg_id = next((k for k, v in tc.items()
-                      if v.get("name","").upper() == sym.upper()), None)
-        # Also check by symbol match
-        if not cg_id:
-            cg_id = next((k for k, v in tc.items()
-                          if k.upper() == sym.upper()), None)
-        p["cg_id"]  = cg_id or ""
+        sym   = p["symbol"].upper()
+        cg_id = sym_to_cg.get(sym, "")
+        p["cg_id"]  = cg_id
         p["cg_url"] = f"https://www.coingecko.com/en/coins/{cg_id}" if cg_id else ""
 
-    # Fix portfolio total: use max of balance-based total vs sum of positions + USDC + ETH
-    usdc_bal    = balances.get("USDC", {}).get("balance", 0.0)
-    usdc_usd    = usdc_bal  # always $1
-    eth_bal     = balances.get("ETH", {}).get("balance", 0.0)
-    eth_price   = prices.get("WETH", 0.0)
-    eth_usd     = eth_bal * eth_price
-    pos_total   = sum(max(p["current_value"], p["cost_basis_usd"]) for p in open_pos)
-    total_usd   = usdc_usd + eth_usd + pos_total
+    # Portfolio total = USDC + ETH + all open position values
+    usdc_bal  = balances.get("USDC", {}).get("balance", 0.0)
+    usdc_usd  = usdc_bal
+    eth_bal   = balances.get("ETH", {}).get("balance", 0.0)
+    eth_price = prices.get("WETH", 0.0)
+    eth_usd   = eth_bal * eth_price
+
+    # Use current value for positions with live price, cost basis as fallback
+    pos_total = 0.0
+    for p in open_pos:
+        if p["current_value"] > 0:
+            pos_total += p["current_value"]
+        elif p["cost_basis_usd"] > 0:
+            pos_total += p["cost_basis_usd"]
+
+    total_usd = usdc_usd + eth_usd + pos_total
 
     unrealized   = sum(p["gain_loss_usd"] for p in open_pos)
     deployed_usd = sum(p["cost_basis_usd"] for p in open_pos)
