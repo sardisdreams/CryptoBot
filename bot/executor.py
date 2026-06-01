@@ -9,6 +9,7 @@ from bot.wallet import Wallet
 from bot.logger import setup_logger
 from bot import recorder, positions
 from bot.aerodrome import AerodromeRouter
+from bot.cost_tracker import record_gas
 
 logger = setup_logger("executor")
 
@@ -234,6 +235,8 @@ class Executor:
             receipt = self.wallet.wait_for_receipt(tx_hash)
             status = "success" if receipt["status"] == 1 else "failed"
             recorder.update_status(tx_hash, status, gas_used=receipt["gasUsed"])
+            gas_eth = (receipt["gasUsed"] * float(self.w3.from_wei(gas_price, "gwei"))) / 1e9
+            record_gas(gas_eth, price_eth_usd)
 
             if status == "success":
                 amount_in_tokens = amount_in_wei / 10 ** token_in_decimals

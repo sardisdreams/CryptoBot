@@ -7,6 +7,7 @@ from bot.portfolio import Portfolio
 from bot.executor import Executor
 from bot.logger import setup_logger
 from bot import history, wiki, positions, blacklist, token_cache
+from bot.cost_tracker import record_anthropic
 from bot.screener import get_screening_report
 from bot.evaluator import score_coin, format_report
 from bot.liquidity import filter_liquid_coins
@@ -720,11 +721,11 @@ class TradingAgent:
         usage = response.usage
         input_tokens  = usage.input_tokens
         output_tokens = usage.output_tokens
-        # Sonnet: $3/M input, $15/M output | Haiku: $0.25/M input, $1.25/M output
         rates = {"claude-sonnet-4-6": (3.0, 15.0), "claude-haiku-4-5-20251001": (0.25, 1.25)}
         ir, or_ = rates.get(model, (3.0, 15.0))
         cost = (input_tokens * ir + output_tokens * or_) / 1_000_000
         logger.info(f"Tokens: {input_tokens} in / {output_tokens} out | Est. cost: ${cost:.4f}")
+        record_anthropic(cost, model)
 
         # Log final reasoning — strip emoji that crash Windows cp1252 terminal
         for block in response.content:

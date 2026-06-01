@@ -17,6 +17,7 @@ from bot.wallet import Wallet
 from bot.positions import get_position_summary, get_realized_summary
 from bot.config import BASE_RPC_URL, PRIVATE_KEY, TOKENS
 from bot.blacklist import block, unblock, get_all as get_blacklist
+from bot.cost_tracker import get_summary as get_cost_summary
 from flask import Flask, render_template_string, jsonify, request, redirect, request, redirect
 from web3 import Web3
 import certifi, requests as req
@@ -97,7 +98,7 @@ HTML = """
 <div class="header">
   <h1>CryptoBot</h1>
   <span class="badge">LIVE</span>
-  <span class="ver">v2.04</span>
+  <span class="ver">v2.05</span>
   <span class="refresh">Auto-refreshes every 60s &nbsp;|&nbsp; {{ stats.wallet_address[:8] }}...{{ stats.wallet_address[-6:] }}</span>
 </div>
 
@@ -178,9 +179,23 @@ HTML = """
       <div class="sub">Tax: capital gains rate</div>
     </div>
     <div class="card">
-      <div class="label">Gas Fees Paid</div>
-      <div class="value sm">${{ "%.2f"|format(stats.total_gas_usd) }}</div>
+      <div class="label">Gas Fees</div>
+      <div class="value sm neg">-${{ "%.2f"|format(stats.total_gas_usd) }}</div>
       <div class="sub">{{ stats.total_txns }} transactions</div>
+    </div>
+    <div class="card">
+      <div class="label">Claude API</div>
+      <div class="value sm neg">-${{ "%.2f"|format(stats.anthropic_total) }}</div>
+      <div class="sub">Today: -${{ "%.4f"|format(stats.anthropic_today) }}</div>
+      <div class="sub2">7d: -${{ "%.2f"|format(stats.anthropic_7d) }} &nbsp;|&nbsp; Alchemy/CoinGecko: free</div>
+    </div>
+    <div class="card" style="border-color:#6366f144">
+      <div class="label">Net Profit (after costs)</div>
+      <div class="value {{ 'pos' if stats.net_profit >= 0 else 'neg' }}">
+        ${{ "%+.2f"|format(stats.net_profit) }}
+      </div>
+      <div class="sub">P&L minus all fees</div>
+      <div class="sub2">Total costs: ${{ "%.2f"|format(stats.total_costs) }}</div>
     </div>
   </div>
 
@@ -539,9 +554,9 @@ def index():
             c["blocked"] = c.get("symbol", "").upper() in blocked_syms
             watchlist.append(c)
 
-    # Gas fees paid
-    total_gas_eth = sum(float(t.get("gas_cost_eth", 0) or 0) for t in txns)
-    total_gas_usd = total_gas_eth * eth_price
+    # Cost tracking
+    costs = get_cost_summary(eth_price)
+    total_gas_usd = costs["gas_total_usd"] or sum(float(t.get("gas_cost_eth",0) or 0) for t in txns) * eth_price
 
     stats = {
         "portfolio_usd":   total_usd,
@@ -559,8 +574,13 @@ def index():
         "eth_balance":     eth_bal,
         "eth_price":       eth_price,
         "balances":        {k: v for k, v in balances.items() if not k.startswith("_")},
-        "total_gas_usd":   round(total_gas_usd, 4),
-        "total_txns":      len(txns),
+        "total_gas_usd":        round(total_gas_usd, 4),
+        "total_txns":           len(txns),
+        "anthropic_today":      costs["anthropic_today"],
+        "anthropic_total":      costs["anthropic_total"],
+        "anthropic_7d":         costs["anthropic_7d"],
+        "total_costs":          costs["total_costs"],
+        "net_profit":           round((realized["total_realized_gain_usd"] + unrealized) - costs["total_costs"], 2),
     }
 
     return render_template_string(
