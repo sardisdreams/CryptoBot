@@ -44,7 +44,7 @@ HTML = """
   .row-label { font-size: 0.7rem; font-weight: 700; color: #475569; text-transform: uppercase;
                letter-spacing: 0.08em; margin: 20px 0 10px; }
   .grid { display: grid; gap: 12px; margin-bottom: 4px; }
-  .grid-holdings { grid-template-columns: 1.6fr repeat(auto-fill, minmax(160px, 1fr)); }
+  .grid-holdings { grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }
   .grid-pnl      { grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
   .card { background: #1a1d2e; border: 1px solid #2d3748; border-radius: 10px; padding: 16px 18px; }
   .card.big { border-color: #3d4a6b; }
@@ -84,6 +84,7 @@ HTML = """
 <div class="header">
   <h1>CryptoBot</h1>
   <span class="badge">LIVE</span>
+  <span style="background:#6366f122;color:#818cf8;border:1px solid #6366f144;padding:3px 10px;border-radius:20px;font-size:0.72rem;font-weight:600">v2.01</span>
   <span class="refresh">Auto-refreshes every 60s &nbsp;|&nbsp; {{ stats.wallet_address[:8] }}...{{ stats.wallet_address[-6:] }}</span>
 </div>
 <div class="container">
