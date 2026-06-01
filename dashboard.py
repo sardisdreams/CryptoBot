@@ -133,28 +133,37 @@ HTML = """
     </div>
   </div>
 
-  <!-- Token Watchlist -->
+  <!-- Agent Watchlist -->
   <div class="section">
-    <h2>Token Watchlist — Base Ecosystem (last screener scan)</h2>
+    <h2>Agent Watchlist — Top 20 tokens being monitored
+      {% if cache_updated %}<span style="color:#475569;font-weight:400;font-size:0.75rem;margin-left:8px">Updated {{ cache_updated }}</span>{% endif %}
+    </h2>
+    <p style="color:#64748b;font-size:0.8rem;margin-bottom:16px">
+      Tokens the agent is actively watching for entry signals. Block any you don't want traded.
+    </p>
     {% if watchlist %}
     <table>
       <tr>
         <th>Token</th><th>Price</th><th>1h</th><th>24h</th>
-        <th>Market Cap</th><th>Volume 24h</th><th>Status</th><th>Action</th>
+        <th>Mkt Cap</th><th>Signals</th><th>Action</th>
       </tr>
       {% for c in watchlist %}
-      <tr style="{{ 'opacity:0.4' if c.blocked else '' }}">
-        <td><strong>{{ c.symbol }}</strong><br><span style="color:#64748b;font-size:0.75rem">{{ c.name }}</span></td>
+      <tr style="{{ 'opacity:0.35;background:#1a0505' if c.blocked else '' }}">
+        <td>
+          <strong>{{ c.symbol }}</strong>
+          <span style="color:#64748b;font-size:0.75rem;display:block">{{ c.name }}</span>
+        </td>
         <td>${{ "%.4f"|format(c.price|float) }}</td>
         <td class="{{ 'pos' if c.change_1h|float >= 0 else 'neg' }}">{{ "%+.2f"|format(c.change_1h|float) }}%</td>
         <td class="{{ 'pos' if c.change_24h|float >= 0 else 'neg' }}">{{ "%+.2f"|format(c.change_24h|float) }}%</td>
-        <td>${{ "%.1fM"|format(c.market_cap|float / 1e6) }}</td>
-        <td>${{ "%.0fK"|format(c.volume_24h|float / 1e3) }}</td>
-        <td>
+        <td>${{ "%.0fM"|format(c.market_cap|float / 1e6) }}</td>
+        <td style="font-size:0.78rem;color:#94a3b8">
           {% if c.blocked %}
-          <span class="pill short">Blocked</span>
+            <span style="color:#ef4444">Blocked by you</span>
+          {% elif c.signals %}
+            {% for s in c.signals %}<span style="display:block">• {{ s }}</span>{% endfor %}
           {% else %}
-          <span class="pill open">Active</span>
+            <span style="color:#475569">Monitoring</span>
           {% endif %}
         </td>
         <td>
@@ -169,7 +178,7 @@ HTML = """
             <input type="hidden" name="symbol" value="{{ c.symbol }}">
             <input type="hidden" name="cg_id"  value="{{ c.cg_id }}">
             <button type="submit" style="background:#ef444422;color:#ef4444;border:1px solid #ef444444;
-              padding:4px 12px;border-radius:6px;cursor:pointer;font-size:0.8rem">Block</button>
+              padding:4px 12px;border-radius:6px;cursor:pointer;font-size:0.8rem">Don't Buy</button>
           </form>
           {% endif %}
         </td>
@@ -177,7 +186,7 @@ HTML = """
       {% endfor %}
     </table>
     {% else %}
-    <div class="empty">No screener data yet — will populate after first bot tick</div>
+    <div class="empty">Watchlist populates after the first bot tick (~30 min)</div>
     {% endif %}
   </div>
 
@@ -394,35 +403,18 @@ def index():
     closed     = _load_csv("records/realized_gains.csv")
     txns       = list(reversed(_load_csv("records/transactions.csv")))
 
-    # Load screener cache + blacklist for watchlist UI
-    bl = get_blacklist()
-    blocked_syms = set(bl.get("symbols", []))
+    # Load agent watchlist from cache
     watchlist = []
+    cache_updated = None
     if os.path.exists("data/screener_cache.json"):
         with open("data/screener_cache.json") as _f:
             cache = json.load(_f)
-        all_coins = cache.get("base_ecosystem", []) + [
-            c for c in cache.get("top_gainers", [])
-            if c.get("symbol") not in {x.get("symbol") for x in cache.get("base_ecosystem", [])}
-        ]
-        seen = set()
-        for c in all_coins:
-            sym = c.get("symbol", "").upper()
-            if sym in seen:
-                continue
-            seen.add(sym)
-            watchlist.append({
-                "symbol":     sym,
-                "name":       c.get("name", ""),
-                "price":      c.get("price", 0),
-                "change_1h":  c.get("change_1h", 0),
-                "change_24h": c.get("change_24h", c.get("change", 0)),
-                "market_cap": c.get("market_cap", 0),
-                "volume_24h": c.get("volume_24h", c.get("volume", 0)),
-                "cg_id":      c.get("cg_id", ""),
-                "blocked":    sym in blocked_syms,
-            })
-        watchlist.sort(key=lambda x: (x["blocked"], -x["change_24h"]))
+        cache_updated = cache.get("updated", "")[:16].replace("T", " ")
+        bl = get_blacklist()
+        blocked_syms = set(bl.get("symbols", []))
+        for c in cache.get("watchlist", []):
+            c["blocked"] = c.get("symbol", "").upper() in blocked_syms
+            watchlist.append(c)
 
     unrealized  = sum(p["gain_loss_usd"] for p in open_pos)
     usdc_bal    = balances.get("USDC", {}).get("balance", 0.0)
@@ -454,6 +446,7 @@ def index():
         closed_trades=list(reversed(closed)),
         transactions=txns,
         watchlist=watchlist,
+        cache_updated=cache_updated,
     )
 
 

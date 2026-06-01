@@ -569,14 +569,62 @@ class TradingAgent:
         snapshot["top_gainers"]    = [c for c in screening.get("top_gainers_24h", []) if not_blocked(c)]
         snapshot["defillama_base"] = screening.get("defillama_base", [])
 
-        # Cache screener results for the dashboard
+        # Cache screener results and build agent watchlist for dashboard
         import json
+        from datetime import datetime as _dt
         os.makedirs("data", exist_ok=True)
+
+        base_eco = screening.get("base_ecosystem", [])
+        prices   = context["prices"]
+        fg_val   = context["fear_and_greed"].get("value", 50)
+        all_inds = history.get_all_indicators([s for s in TOKENS if s not in {"USDC","USDT","DAI"}])
+
+        # Build top 20 watchlist: score each coin by signal strength
+        watchlist_coins = []
+        for coin in base_eco[:30]:
+            sym        = coin.get("symbol", "")
+            change_1h  = coin.get("change_1h", 0) or 0
+            change_24h = coin.get("change_24h", 0) or 0
+            mcap       = coin.get("market_cap", 0) or 0
+            vol        = coin.get("volume_24h", 0) or 0
+            vol_mcap   = (vol / mcap) if mcap > 0 else 0
+
+            signals = []
+            if change_1h > 2:    signals.append(f"+{change_1h:.1f}% 1h momentum")
+            if change_1h < -3:   signals.append(f"{change_1h:.1f}% 1h dip — watch for recovery")
+            if change_24h > 10:  signals.append(f"+{change_24h:.1f}% 24h gainer")
+            if vol_mcap > 0.5:   signals.append(f"High volume ({vol_mcap:.1f}x mcap)")
+            ind = all_inds.get(sym, {})
+            rsi = ind.get("rsi_14")
+            if rsi and rsi < 30: signals.append(f"RSI oversold ({rsi:.0f})")
+            if rsi and rsi > 70: signals.append(f"RSI overbought ({rsi:.0f})")
+            is_trending = sym in [t.get("symbol","") for t in context.get("trending_tokens", [])]
+            if is_trending:      signals.append("Trending on CoinGecko")
+
+            watchlist_coins.append({
+                "symbol":     sym,
+                "name":       coin.get("name", ""),
+                "price":      coin.get("price", 0),
+                "change_1h":  change_1h,
+                "change_24h": change_24h,
+                "market_cap": mcap,
+                "volume_24h": vol,
+                "cg_id":      coin.get("cg_id", ""),
+                "signals":    signals,
+                "signal_count": len(signals),
+                "blocked":    blacklist.is_blocked(sym, coin.get("cg_id","")),
+            })
+
+        # Sort by signal count desc, then 1h change
+        watchlist_coins.sort(key=lambda c: (-c["signal_count"], -c["change_1h"]))
+
         with open("data/screener_cache.json", "w") as _f:
             json.dump({
-                "base_ecosystem": screening.get("base_ecosystem", []),
+                "base_ecosystem": base_eco,
                 "top_gainers":    screening.get("top_gainers_24h", []),
-                "updated":        __import__("datetime").datetime.utcnow().isoformat(),
+                "watchlist":      watchlist_coins[:20],
+                "updated":        _dt.utcnow().isoformat(),
+                "fear_greed":     fg_val,
             }, _f)
 
         market_context = self._build_market_prompt(snapshot)
