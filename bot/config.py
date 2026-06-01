@@ -36,6 +36,11 @@ USDC_ADDRESS = TOKENS["USDC"]["address"]
 SLIPPAGE_TOLERANCE = float(os.getenv("SLIPPAGE_TOLERANCE", "0.005"))
 GAS_LIMIT = 300_000
 
+# Capital deployment limits
+MAX_DEPLOY_USD = 200.0    # never deploy more than this total across all open positions
+MIN_TRADE_USD  = 20.0     # minimum trade size (below this, gas isn't worth it)
+MAX_TRADE_USD  = 75.0     # max single trade size during testing phase
+
 # Pool fee tiers: 500 = 0.05%, 3000 = 0.3%, 10000 = 1%
 DEFAULT_FEE = 3000
 

@@ -22,7 +22,7 @@ logger = setup_logger("main")
 os.makedirs("logs", exist_ok=True)
 os.makedirs("records", exist_ok=True)
 
-RUN_INTERVAL_SECONDS = 3600  # Run agent every 60 minutes (switch to 1800 once profitable)
+RUN_INTERVAL_SECONDS = 1800  # 30 minutes — frequent scanning for short-term opportunities
 
 
 def main():

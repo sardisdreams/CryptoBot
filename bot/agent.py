@@ -2,7 +2,7 @@ import os
 import httpx
 import certifi
 import anthropic
-from bot.config import ANTHROPIC_API_KEY, TOKENS
+from bot.config import ANTHROPIC_API_KEY, TOKENS, MAX_DEPLOY_USD, MIN_TRADE_USD, MAX_TRADE_USD
 from bot.portfolio import Portfolio
 from bot.executor import Executor
 from bot.logger import setup_logger
@@ -25,17 +25,29 @@ def _read_notes() -> list[str]:
                 lines.append(line)
     return lines
 
-SYSTEM_PROMPT = """You are an autonomous crypto trading agent operating on the Base blockchain.
+SYSTEM_PROMPT = f"""You are an autonomous crypto trading agent operating on the Base blockchain.
 
-Your goal is to grow total USD portfolio value aggressively but safely, targeting 10%+ returns.
-BTC and ETH alone are not enough for this — the real opportunities are in Base-native low/mid cap tokens ($5M–$500M market cap).
+Your goal is to find and execute short-term trading opportunities — hours to a few days, not weeks.
+This is NOT a buy-and-hold portfolio. Get in, capture the move, get back to USDC.
 
-## Strategy
-- **Primary targets:** Base-native coins with real projects, growing TVL/activity, and upcoming catalysts
-- **ETH/cbBTC:** Secondary — hold as safe harbor only when no better opportunities exist
-- **USDC:** Keep at least 30% as reserve. Always cycle profits back to USDC after a trade closes.
-- **Position sizing:** 5–15% per low-cap coin. Never over-concentrate.
-- **Always keep 0.005 ETH minimum for gas.**
+## Capital rules (strict)
+- Total deployed capital across ALL open positions: max ${MAX_DEPLOY_USD:.0f}
+- Single trade size: ${MIN_TRADE_USD:.0f}–${MAX_TRADE_USD:.0f}
+- The remaining ~$300 USDC stays as reserve — do not touch it
+- Always keep at least 0.005 ETH for gas
+- These limits exist because we are in testing phase — respect them exactly
+
+## Trading style
+- Short-term swing trades: target hold time is hours to 2-3 days maximum
+- Exit when the momentum that got you in starts fading — don't wait for the "full move"
+- Frequent small wins beat rare big wins
+- If a trade isn't working within a few hours, exit and redeploy elsewhere
+- Do NOT hold hoping for recovery — cut losses quickly (25% down = exit)
+
+## Primary targets
+- Base-native coins with real projects, $5M–$500M market cap
+- ETH/cbBTC: only if a clear short-term technical setup appears
+- Always sell back to USDC after closing — never rotate directly between crypto assets
 
 ## Finding opportunities
 Each tick you receive prices, RSI, momentum, volume, TVL data, trending tokens, and analyst notes.
@@ -146,8 +158,14 @@ class TradingAgent:
         open_pos = positions.get_position_summary(snapshot.get("prices", {}))
         realized = positions.get_realized_summary()
 
+        currently_deployed = sum(p["current_value"] for p in open_pos)
+        deploy_remaining = max(0, MAX_DEPLOY_USD - currently_deployed)
+
         lines = [
             f"Total portfolio value: ${snapshot['total_usd']:,.2f}",
+            f"Deployment cap: ${currently_deployed:.2f} deployed of ${MAX_DEPLOY_USD:.0f} max "
+            f"(${deploy_remaining:.2f} available to deploy)",
+            f"Trade size limits: ${MIN_TRADE_USD:.0f}–${MAX_TRADE_USD:.0f} per trade",
             f"Total realized gains: ${realized['total_realized_gain_usd']:+,.2f} "
             f"(short-term: ${realized['short_term_gain_usd']:+,.2f} | "
             f"long-term: ${realized['long_term_gain_usd']:+,.2f})",
@@ -324,6 +342,30 @@ class TradingAgent:
             return f"Error: could not get price for {token_in_sym}"
 
         # Convert USD amount to token units
+        amount_tokens = amount_usd / price_in
+        amount_wei = int(amount_tokens * (10 ** token_in["decimals"]))
+
+        # Enforce minimum trade size
+        if amount_usd < MIN_TRADE_USD:
+            return f"Trade too small: ${amount_usd:.2f} is below minimum ${MIN_TRADE_USD:.2f} (gas not worth it)"
+
+        # Enforce maximum single trade size
+        if amount_usd > MAX_TRADE_USD:
+            amount_usd = MAX_TRADE_USD
+            logger.info(f"Trade capped at ${MAX_TRADE_USD:.0f} (testing phase limit)")
+
+        # Enforce total deployment cap
+        open_pos = positions.get_position_summary(snapshot.get("prices", {}))
+        currently_deployed = sum(p["current_value"] for p in open_pos)
+        if token_in_sym in {"USDC", "USDT", "DAI"}:  # buying crypto
+            if currently_deployed + amount_usd > MAX_DEPLOY_USD:
+                remaining = MAX_DEPLOY_USD - currently_deployed
+                if remaining < MIN_TRADE_USD:
+                    return f"Deployment cap reached: ${currently_deployed:.2f} already deployed of ${MAX_DEPLOY_USD:.0f} max"
+                amount_usd = min(amount_usd, remaining)
+                logger.info(f"Trade reduced to ${amount_usd:.2f} to stay within ${MAX_DEPLOY_USD:.0f} cap")
+
+        # Recalculate amount_wei after any cap adjustments
         amount_tokens = amount_usd / price_in
         amount_wei = int(amount_tokens * (10 ** token_in["decimals"]))
 
