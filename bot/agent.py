@@ -394,22 +394,31 @@ class TradingAgent:
     def _is_market_active(self, snapshot: dict) -> bool:
         """
         Quick check: are there any interesting signals this tick?
-        If not, use Haiku. If yes, escalate to Sonnet.
+        If not, use Haiku (cheap). If yes, escalate to Sonnet (better reasoning).
         """
         fg = snapshot.get("fear_and_greed", {}).get("value", 50)
         market_data = snapshot.get("market_data", {})
 
         # Escalate if Fear & Greed is extreme
         if fg <= 20 or fg >= 80:
+            logger.info("Market active: extreme Fear/Greed")
             return True
 
         # Escalate if any whitelisted coin moved >3% in 1h
         for sym, d in market_data.items():
             if abs(d.get("change_1h", 0)) >= 3:
+                logger.info(f"Market active: {sym} moved {d['change_1h']:+.1f}% in 1h")
+                return True
+
+        # Escalate if screener found meaningful gainers (>5% in 24h)
+        for coin in snapshot.get("top_gainers", []):
+            if abs(coin.get("change", 0)) >= 5:
+                logger.info(f"Market active: screener found {coin['symbol']} up {coin['change']:+.1f}%")
                 return True
 
         # Escalate if analyst notes are present
         if _read_notes():
+            logger.info("Market active: analyst notes present")
             return True
 
         # Escalate if RSI is oversold or overbought on any coin
@@ -417,6 +426,14 @@ class TradingAgent:
         for sym, ind in indicators.items():
             rsi = ind.get("rsi_14")
             if rsi and (rsi <= 30 or rsi >= 70):
+                logger.info(f"Market active: {sym} RSI={rsi}")
+                return True
+
+        # Escalate if open positions need monitoring (P&L > ±15%)
+        open_pos = positions.get_position_summary(snapshot.get("prices", {}))
+        for p in open_pos:
+            if abs(p.get("gain_loss_pct", 0)) >= 15:
+                logger.info(f"Market active: {p['symbol']} P&L={p['gain_loss_pct']:+.1f}%")
                 return True
 
         return False

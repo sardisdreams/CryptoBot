@@ -124,30 +124,8 @@ class Market:
             return []
 
     def get_aerodrome_top_pools(self) -> list[dict]:
-        """
-        Fetch top liquidity pools from Aerodrome via their public API.
-        Shows which tokens have real trading activity on Base.
-        """
-        try:
-            resp = requests.get(
-                "https://api.aerodrome.finance/api/v1/pools",
-                params={"limit": 20, "sort": "volume"},
-                timeout=10,
-                verify=SSL,
-            )
-            resp.raise_for_status()
-            pools = resp.json().get("data", []) or resp.json()
-            result = []
-            for p in pools[:10]:
-                token0 = p.get("token0", {}).get("symbol", "?")
-                token1 = p.get("token1", {}).get("symbol", "?")
-                vol = float(p.get("volumeUSD", 0) or p.get("volume24h", 0) or 0)
-                result.append({"pair": f"{token0}/{token1}", "volume_usd": vol})
-            logger.info(f"Aerodrome top pools: {[p['pair'] for p in result[:5]]}")
-            return result
-        except Exception as e:
-            logger.warning(f"Aerodrome pools fetch failed: {e}")
-            return []
+        # Aerodrome public API not currently available — using DeFiLlama for Base DEX data instead
+        return []
 
     def get_full_context(self) -> dict:
         market_data = self.get_market_data()
