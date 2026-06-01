@@ -12,9 +12,10 @@ os.makedirs("records", exist_ok=True)
 os.makedirs("data", exist_ok=True)
 
 from bot.market import Market
-from bot.positions import get_position_summary, get_realized_summary, get_open_positions
-from bot.config import BASE_RPC_URL, PRIVATE_KEY
+from bot.portfolio import Portfolio
 from bot.wallet import Wallet
+from bot.positions import get_position_summary, get_realized_summary
+from bot.config import BASE_RPC_URL, PRIVATE_KEY, TOKENS
 from web3 import Web3
 import certifi, requests as req
 
@@ -77,16 +78,21 @@ HTML = """
 
   <div class="grid">
     <div class="card">
-      <div class="label">Portfolio Value</div>
+      <div class="label">Total Portfolio</div>
       <div class="value">${{ "%.2f"|format(stats.portfolio_usd) }}</div>
       <div class="sub">{{ stats.wallet_address[:6] }}...{{ stats.wallet_address[-4:] }}</div>
     </div>
     <div class="card">
-      <div class="label">Realized P&L</div>
-      <div class="value {{ 'pos' if stats.realized_gain >= 0 else 'neg' }}">
-        ${{ "%+.2f"|format(stats.realized_gain) }}
+      <div class="label">USDC Reserve</div>
+      <div class="value {{ 'neg' if stats.usdc_pct < 30 else '' }}"
+           style="{{ 'color:#ef4444' if stats.usdc_pct < 30 else '' }}">
+        ${{ "%.2f"|format(stats.usdc_usd) }}
       </div>
-      <div class="sub">{{ stats.total_trades }} closed trades</div>
+      <div class="sub">
+        {{ "%.2f"|format(stats.usdc_balance) }} USDC —
+        {{ "%.1f"|format(stats.usdc_pct) }}% of portfolio
+        {{ "⚠️ Below 30% floor!" if stats.usdc_pct < 30 else "" }}
+      </div>
     </div>
     <div class="card">
       <div class="label">Unrealized P&L</div>
@@ -96,26 +102,32 @@ HTML = """
       <div class="sub">{{ stats.open_positions }} open positions</div>
     </div>
     <div class="card">
-      <div class="label">ETH Balance (gas)</div>
-      <div class="value {{ 'warn' if stats.eth_balance < 0.005 else '' }}"
-           style="{{ 'color:#f59e0b' if stats.eth_balance < 0.005 else '' }}">
-        {{ "%.5f"|format(stats.eth_balance) }}
+      <div class="label">Realized P&L</div>
+      <div class="value {{ 'pos' if stats.realized_gain >= 0 else 'neg' }}">
+        ${{ "%+.2f"|format(stats.realized_gain) }}
       </div>
-      <div class="sub">{{ "LOW — top up needed" if stats.eth_balance < 0.005 else "Base network" }}</div>
+      <div class="sub">{{ stats.total_trades }} closed trades</div>
     </div>
     <div class="card">
-      <div class="label">Short-term Gains</div>
+      <div class="label">Short-term Gains (tax)</div>
       <div class="value {{ 'pos' if stats.short_term >= 0 else 'neg' }}">
         ${{ "%+.2f"|format(stats.short_term) }}
       </div>
-      <div class="sub">Tax: ordinary income rate</div>
+      <div class="sub">Ordinary income rate</div>
     </div>
     <div class="card">
-      <div class="label">Long-term Gains</div>
+      <div class="label">Long-term Gains (tax)</div>
       <div class="value {{ 'pos' if stats.long_term >= 0 else 'neg' }}">
         ${{ "%+.2f"|format(stats.long_term) }}
       </div>
-      <div class="sub">Tax: capital gains rate</div>
+      <div class="sub">Capital gains rate</div>
+    </div>
+    <div class="card">
+      <div class="label">ETH Gas Reserve</div>
+      <div class="value" style="{{ 'color:#f59e0b' if stats.eth_balance < 0.005 else '' }}">
+        {{ "%.5f"|format(stats.eth_balance) }}
+      </div>
+      <div class="sub">{{ "⚠️ LOW — top up needed" if stats.eth_balance < 0.005 else "Base network gas" }}</div>
     </div>
   </div>
 
@@ -233,19 +245,42 @@ def _load_csv(path: str) -> list[dict]:
         return list(csv.DictReader(f))
 
 
-def _get_portfolio_usd(w3, wallet_address: str, prices: dict) -> float:
+ERC20_ABI = [{"inputs": [{"name": "account", "type": "address"}],
+              "name": "balanceOf", "outputs": [{"name": "", "type": "uint256"}],
+              "stateMutability": "view", "type": "function"}]
+
+def _get_full_balances(w3, wallet_address: str, prices: dict) -> dict:
+    """Return balances and USD values for all tokens including USDC."""
+    balances = {}
+    total_usd = 0.0
+
+    # Native ETH (gas only)
     try:
         eth_bal = float(Web3.from_wei(w3.eth.get_balance(wallet_address), "ether"))
-        return eth_bal * prices.get("WETH", 0)
     except Exception:
-        return 0.0
+        eth_bal = 0.0
+    eth_usd = eth_bal * prices.get("WETH", 0)
+    balances["ETH"] = {"balance": eth_bal, "value_usd": eth_usd, "is_gas": True}
+    total_usd += eth_usd
 
+    # ERC-20 tokens
+    for symbol, info in TOKENS.items():
+        if symbol == "WETH":
+            continue
+        try:
+            contract = w3.eth.contract(
+                address=Web3.to_checksum_address(info["address"]), abi=ERC20_ABI
+            )
+            raw = contract.functions.balanceOf(wallet_address).call()
+            bal = raw / (10 ** info["decimals"])
+            val = bal * prices.get(symbol, 0)
+            balances[symbol] = {"balance": bal, "value_usd": val, "is_gas": False}
+            total_usd += val
+        except Exception:
+            balances[symbol] = {"balance": 0.0, "value_usd": 0.0, "is_gas": False}
 
-def _get_eth_balance(w3, wallet_address: str) -> float:
-    try:
-        return float(Web3.from_wei(w3.eth.get_balance(wallet_address), "ether"))
-    except Exception:
-        return 0.0
+    balances["_total_usd"] = total_usd
+    return balances
 
 
 @app.route("/")
@@ -260,23 +295,33 @@ def index():
     from eth_account import Account
     wallet_address = Account.from_key(PRIVATE_KEY).address
 
+    balances   = _get_full_balances(w3, wallet_address, prices)
     open_pos   = get_position_summary(prices)
     realized   = get_realized_summary()
     closed     = _load_csv("records/realized_gains.csv")
     txns       = list(reversed(_load_csv("records/transactions.csv")))
 
-    unrealized = sum(p["gain_loss_usd"] for p in open_pos)
+    unrealized  = sum(p["gain_loss_usd"] for p in open_pos)
+    usdc_bal    = balances.get("USDC", {}).get("balance", 0.0)
+    usdc_usd    = balances.get("USDC", {}).get("value_usd", 0.0)
+    eth_bal     = balances.get("ETH", {}).get("balance", 0.0)
+    total_usd   = balances.get("_total_usd", 0.0)
+    usdc_pct    = (usdc_usd / total_usd * 100) if total_usd > 0 else 0
 
     stats = {
-        "portfolio_usd":  _get_portfolio_usd(w3, wallet_address, prices),
-        "wallet_address": wallet_address,
-        "realized_gain":  realized["total_realized_gain_usd"],
-        "short_term":     realized["short_term_gain_usd"],
-        "long_term":      realized["long_term_gain_usd"],
-        "total_trades":   realized["total_trades_closed"],
-        "open_positions": len(open_pos),
+        "portfolio_usd":   total_usd,
+        "usdc_balance":    usdc_bal,
+        "usdc_usd":        usdc_usd,
+        "usdc_pct":        usdc_pct,
+        "wallet_address":  wallet_address,
+        "realized_gain":   realized["total_realized_gain_usd"],
+        "short_term":      realized["short_term_gain_usd"],
+        "long_term":       realized["long_term_gain_usd"],
+        "total_trades":    realized["total_trades_closed"],
+        "open_positions":  len(open_pos),
         "unrealized_gain": unrealized,
-        "eth_balance":    _get_eth_balance(w3, wallet_address),
+        "eth_balance":     eth_bal,
+        "balances":        {k: v for k, v in balances.items() if not k.startswith("_")},
     }
 
     return render_template_string(
