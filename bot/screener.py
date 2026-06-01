@@ -1,3 +1,4 @@
+import time
 import requests
 import certifi
 from bot.logger import setup_logger
@@ -138,9 +139,14 @@ def get_defillama_base_protocols() -> list[dict]:
 
 
 def get_screening_report() -> dict:
-    """Full screening report — all discovery signals in one call."""
+    """Full screening report with delays to respect CoinGecko rate limits."""
+    base  = get_base_ecosystem_coins()
+    time.sleep(1.5)
+    gainers = get_top_gainers(24)
+    time.sleep(1.0)
+    defi  = get_defillama_base_protocols()
     return {
-        "base_ecosystem":    get_base_ecosystem_coins(),
-        "top_gainers_24h":   get_top_gainers(24),
-        "defillama_base":    get_defillama_base_protocols(),
+        "base_ecosystem":  base,
+        "top_gainers_24h": gainers,
+        "defillama_base":  defi,
     }

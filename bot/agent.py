@@ -85,6 +85,7 @@ If the trade thesis breaks, exit regardless of P&L. Always sell back to USDC.
 ## Trading any coin
 You can trade ANY token on Base — no whitelist. Use get_token_info to look up a coin's
 contract address and decimals before trading it. Use evaluate_coin to check safety if uncertain.
+If get_token_info or evaluate_coin returns "rate limited", do NOT retry — skip that coin this tick.
 
 ## Pump and dump protection
 - Sudden >20% spike with no news = likely pump, use caution
@@ -305,7 +306,9 @@ class TradingAgent:
         return "\n".join(lines)
 
     def _get_token_info(self, cg_id: str) -> str:
+        import time as _time
         import requests as req
+        _time.sleep(1.5)  # respect CoinGecko rate limit
         try:
             resp = req.get(
                 f"https://api.coingecko.com/api/v3/coins/{cg_id}",
@@ -313,6 +316,8 @@ class TradingAgent:
                 timeout=15,
                 verify=certifi.where(),
             )
+            if resp.status_code == 429:
+                return f"CoinGecko rate limited for {cg_id} — wait 60s and try again next tick"
             resp.raise_for_status()
             data = resp.json()
             platforms = data.get("detail_platforms", {}) or data.get("platforms", {})

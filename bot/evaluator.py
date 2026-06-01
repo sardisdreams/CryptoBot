@@ -1,3 +1,4 @@
+import time
 import requests
 import certifi
 from bot.logger import setup_logger
@@ -6,8 +7,7 @@ logger = setup_logger("evaluator")
 
 SSL = certifi.where()
 
-COINGECKO_COIN   = "https://api.coingecko.com/api/v3/coins/{}"
-BASESCAN_API     = "https://api.basescan.org/api"
+COINGECKO_COIN = "https://api.coingecko.com/api/v3/coins/{}"
 
 
 def score_coin(cg_id: str, basescan_api_key: str = None) -> dict:
@@ -20,16 +20,19 @@ def score_coin(cg_id: str, basescan_api_key: str = None) -> dict:
     details = {}
 
     try:
+        time.sleep(1.5)  # respect CoinGecko free tier rate limit
         resp = requests.get(
             COINGECKO_COIN.format(cg_id),
             params={"localization": "false", "tickers": "false", "community_data": "true"},
             timeout=15,
             verify=SSL,
         )
+        if resp.status_code == 429:
+            return {"score": -1, "grade": "?", "flags": ["CoinGecko rate limited — try again next tick"], "details": {}}
         resp.raise_for_status()
         data = resp.json()
     except Exception as e:
-        return {"score": 0, "grade": "F", "flags": [f"Could not fetch data: {e}"], "details": {}}
+        return {"score": -1, "grade": "?", "flags": [f"Could not fetch data: {e}"], "details": {}}
 
     # --- Market cap check (10 pts) ---
     mc = data.get("market_data", {}).get("market_cap", {}).get("usd", 0) or 0
@@ -191,7 +194,7 @@ def format_report(evaluation: dict) -> str:
         lines.append(f"  GitHub commits (4w): {d['github_commits_4w']}")
 
     if evaluation["flags"]:
-        lines += ["", "⚠️  Flags:"]
+        lines += ["", "FLAGS:"]
         for flag in evaluation["flags"]:
             lines.append(f"  - {flag}")
 
