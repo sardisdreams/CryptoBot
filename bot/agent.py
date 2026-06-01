@@ -6,7 +6,7 @@ from bot.config import ANTHROPIC_API_KEY, TOKENS, MAX_DEPLOY_USD, MIN_TRADE_USD,
 from bot.portfolio import Portfolio
 from bot.executor import Executor
 from bot.logger import setup_logger
-from bot import history, wiki, positions, blacklist
+from bot import history, wiki, positions, blacklist, token_cache
 from bot.screener import get_screening_report
 from bot.evaluator import score_coin, format_report
 
@@ -265,8 +265,9 @@ class TradingAgent:
 
         lines += [
             "",
-            "Approved tokens for trading (whitelist only):",
+            "Known tokens (no lookup needed — use symbol directly in execute_swap):",
             ", ".join(TOKENS.keys()),
+            "For any other Base token: use get_token_info(cg_id) to get contract address, then trade it.",
         ]
 
         # Top 5 Base ecosystem movers only (sorted by abs 1h change)
@@ -307,9 +308,21 @@ class TradingAgent:
         return "\n".join(lines)
 
     def _get_token_info(self, cg_id: str) -> str:
+        # Check local cache first — avoids CoinGecko API call entirely
+        cached = token_cache.get(cg_id)
+        if cached:
+            logger.info(f"Token info from cache: {cg_id}")
+            return (
+                f"{cached['name']} ({cg_id})\n"
+                f"Base contract: {cached['address']}\n"
+                f"Decimals: {cached['decimals']}\n"
+                f"Price: ${cached.get('price', 0):,.6f}\n"
+                f"Use these values in execute_swap."
+            )
+
         import time as _time
         import requests as req
-        _time.sleep(1.5)  # respect CoinGecko rate limit
+        _time.sleep(2.0)  # respect CoinGecko rate limit
         try:
             resp = req.get(
                 f"https://api.coingecko.com/api/v3/coins/{cg_id}",
@@ -329,6 +342,8 @@ class TradingAgent:
             name = data.get("name", cg_id)
             if not contract:
                 return f"{name}: not found on Base chain. May not be deployed on Base."
+            # Save to cache so we never need to call CoinGecko for this token again
+            token_cache.store(cg_id, contract, decimals, name, price)
             return (
                 f"{name} ({cg_id})\n"
                 f"Base contract: {contract}\n"
