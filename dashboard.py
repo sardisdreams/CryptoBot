@@ -265,7 +265,7 @@ HTML = """
       <tr>
         <th>Token</th><th>Amount</th><th>Entry</th><th>Current</th>
         <th>Cost</th><th>Value</th><th>P&L $</th><th>P&L %</th>
-        <th>Take Profit</th><th>Stop Loss</th><th>Window</th><th>Opened</th><th>Tx</th>
+        <th>Take Profit</th><th>Stop Loss</th><th>Window</th>
       </tr>
       {% for p in open_positions %}
       <tr>
@@ -289,8 +289,6 @@ HTML = """
         <td {% if p.hours_remaining is not none and p.hours_remaining < 4 %}class="warn"{% endif %}>
           {% if p.hours_remaining is not none %}{% if p.hours_remaining < 0 %}Expired{% else %}{{ p.hours_remaining }}h{% endif %}{% else %}—{% endif %}
         </td>
-        <td style="color:#64748b;font-size:0.7rem">{{ p.date_opened[:16].replace('T',' ') }}</td>
-        <td><a href="https://basescan.org/tx/{{ p.get('entry_tx','') }}" target="_blank" class="hash">{{ p.get('entry_tx','')[:8] }}...</a></td>
       </tr>
       {% endfor %}
     </table>
