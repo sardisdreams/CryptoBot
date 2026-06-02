@@ -277,7 +277,7 @@ HTML = """
         <td>{% if p.entry_price > 0 %}${{ "%.6f"|format(p.entry_price) }}{% else %}<span class="tag-unk">unknown</span>{% endif %}</td>
         <td>{% if p.current_price > 0 %}${{ "%.6f"|format(p.current_price) }}{% else %}<span class="tag-unk">pending</span>{% endif %}</td>
         <td>{% if p.cost_basis_usd > 0 %}${{ "%.2f"|format(p.cost_basis_usd) }}{% else %}—{% endif %}</td>
-        <td>{% if p.current_value > 0 %}${{ "%.2f"|format(p.current_value) }}{% else %}—{% endif %}</td>
+        <td class="{{ 'pos' if p.current_value >= p.cost_basis_usd else 'neg' }}">{% if p.current_value > 0 %}${{ "%.2f"|format(p.current_value) }}{% else %}—{% endif %}</td>
         <td class="{{ 'pos' if p.gain_loss_usd >= 0 else 'neg' }}">
           {% if p.cost_basis_usd > 0 %}${{ "%+.2f"|format(p.gain_loss_usd) }}{% else %}—{% endif %}
         </td>
