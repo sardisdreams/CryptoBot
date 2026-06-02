@@ -3,7 +3,8 @@ import os
 import csv
 import json
 from datetime import datetime, timezone
-from flask import Flask, render_template_string, jsonify, request, redirect
+from functools import wraps
+from flask import Flask, render_template_string, jsonify, request, redirect, Response
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -23,6 +24,24 @@ from web3 import Web3
 import certifi, requests as req
 
 app = Flask(__name__)
+
+# Basic auth — set DASHBOARD_USER and DASHBOARD_PASS in .env (optional, skip locally)
+DASH_USER = os.getenv("DASHBOARD_USER", "")
+DASH_PASS = os.getenv("DASHBOARD_PASS", "")
+
+def require_auth(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not DASH_USER or not DASH_PASS:
+            return f(*args, **kwargs)  # no auth configured — allow all
+        auth = request.authorization
+        if not auth or auth.username != DASH_USER or auth.password != DASH_PASS:
+            return Response(
+                "Authentication required", 401,
+                {"WWW-Authenticate": 'Basic realm="CryptoBot"'}
+            )
+        return f(*args, **kwargs)
+    return decorated
 
 HTML = """
 <!DOCTYPE html>
@@ -98,7 +117,7 @@ HTML = """
 <div class="header">
   <h1>CryptoBot</h1>
   <span class="badge">LIVE</span>
-  <span class="ver">v2.05</span>
+  <span class="ver">v2.06</span>
   <span class="refresh">Auto-refreshes every 60s &nbsp;|&nbsp; {{ stats.wallet_address[:8] }}...{{ stats.wallet_address[-6:] }}</span>
 </div>
 
@@ -445,6 +464,7 @@ def _get_full_balances(w3, wallet_address: str, prices: dict) -> dict:
 
 
 @app.route("/")
+@require_auth
 def index():
     session = req.Session()
     session.verify = certifi.where()

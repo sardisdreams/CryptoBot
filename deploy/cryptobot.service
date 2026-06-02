@@ -1,0 +1,21 @@
+[Unit]
+Description=CryptoBot Trading Agent
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=cryptobot
+WorkingDirectory=/opt/cryptobot/app
+ExecStart=/opt/cryptobot/app/.venv/bin/python main.py
+Restart=always
+RestartSec=30
+StandardOutput=journal
+StandardError=journal
+Environment=PYTHONUNBUFFERED=1
+
+# Give the process time to shut down cleanly
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,17 @@
+[Unit]
+Description=CryptoBot Dashboard
+After=network.target
+
+[Service]
+Type=simple
+User=cryptobot
+WorkingDirectory=/opt/cryptobot/app
+ExecStart=/opt/cryptobot/app/.venv/bin/python dashboard.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target
