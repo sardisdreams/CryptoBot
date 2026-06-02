@@ -59,6 +59,7 @@ def open_position(
     take_profit_pct: float = 25.0,
     stop_loss_pct: float = 25.0,
     max_hold_hours: float = 48.0,
+    reasoning: str = "",
 ) -> str:
     """Record a new buy with TP/SL/time targets. Returns the position ID."""
     from datetime import timedelta
@@ -84,6 +85,7 @@ def open_position(
         "max_hold_until":    max_hold_until,
         "take_profit_pct":   take_profit_pct,
         "stop_loss_pct":     stop_loss_pct,
+        "entry_reasoning":   reasoning,
     })
     _save(positions)
     return position_id
@@ -140,18 +142,19 @@ def close_position(
         term           = "long" if hold_days >= 365 else "short"
 
         record = {
-            "date_opened":   lot["date_opened"],
-            "date_closed":   date_closed,
-            "token":         symbol,
-            "amount_tokens": round(used, 8),
-            "cost_basis_usd": cost_basis,
-            "proceeds_usd":  proceeds,
-            "gain_loss_usd": gain_loss,
-            "gain_loss_pct": gain_pct,
-            "hold_days":     hold_days,
-            "term":          term,
-            "entry_tx":      lot["entry_tx"],
-            "exit_tx":       exit_tx,
+            "date_opened":      lot["date_opened"],
+            "date_closed":      date_closed,
+            "token":            symbol,
+            "amount_tokens":    round(used, 8),
+            "cost_basis_usd":   cost_basis,
+            "proceeds_usd":     proceeds,
+            "gain_loss_usd":    gain_loss,
+            "gain_loss_pct":    gain_pct,
+            "hold_days":        hold_days,
+            "term":             term,
+            "entry_tx":         lot["entry_tx"],
+            "exit_tx":          exit_tx,
+            "entry_reasoning":  lot.get("entry_reasoning", ""),
         }
         realized.append(record)
 

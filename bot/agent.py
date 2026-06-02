@@ -558,6 +558,8 @@ class TradingAgent:
             take_profit_pct=float(tool_input.get("take_profit_pct", 25.0)),
             stop_loss_pct=float(tool_input.get("stop_loss_pct", 25.0)),
             max_hold_hours=float(tool_input.get("max_hold_hours", 48.0)),
+            entry_reasoning=reasoning if token_in_sym in {"USDC", "USDT", "DAI"} else "",
+            exit_reasoning=reasoning if token_in_sym not in {"USDC", "USDT", "DAI"} else "",
         )
 
         if tx_hash:
@@ -659,6 +661,7 @@ class TradingAgent:
                         amount_in_wei=amount_wei,
                         token_in_price_usd=price,
                         token_out_price_usd=1.0,
+                        exit_reasoning=f"Mechanical {ex['exit_type']}: {reason}",
                     )
             # Time suggestion — just log it, agent will handle in its reasoning
             elif ex["exit_type"] == "time_suggestion":

@@ -7,7 +7,7 @@ from bot.config import (
 )
 from bot.wallet import Wallet
 from bot.logger import setup_logger
-from bot import recorder, positions
+from bot import recorder, positions, knowledge
 from bot.aerodrome import AerodromeRouter
 from bot.cost_tracker import record_gas
 
@@ -64,6 +64,29 @@ ERC20_ABI = [
      "name": "allowance", "outputs": [{"name": "", "type": "uint256"}],
      "stateMutability": "view", "type": "function"},
 ]
+
+
+def _record_trade_postmortem(record: dict, exit_reasoning: str):
+    """Write a trade post-mortem to the knowledge base after any close."""
+    token       = record.get("token", "?")
+    gain_pct    = record.get("gain_loss_pct", 0)
+    gain_usd    = record.get("gain_loss_usd", 0)
+    cost        = record.get("cost_basis_usd", 0)
+    hold_days   = record.get("hold_days", 0)
+    entry_rsn   = record.get("entry_reasoning", "") or "no entry reasoning recorded"
+    exit_rsn    = exit_reasoning or "no exit reasoning recorded"
+    outcome     = "WIN" if gain_pct >= 0 else "LOSS"
+
+    hold_str = f"{hold_days}d" if hold_days >= 1 else "<1d"
+    summary = (
+        f"{outcome} | {token} {gain_pct:+.1f}% (${gain_usd:+.2f} on ${cost:.0f}) | "
+        f"held {hold_str} | "
+        f"ENTRY: {entry_rsn} | "
+        f"EXIT: {exit_rsn}"
+    )
+    cat = "strategy"
+    knowledge.add_entry(cat, summary)
+    logger.info(f"Trade post-mortem saved to knowledge base: {token} {gain_pct:+.1f}%")
 
 
 class Executor:
@@ -141,6 +164,8 @@ class Executor:
         stop_loss_pct: float = 25.0,
         max_hold_hours: float = 48.0,
         fee: int = DEFAULT_FEE,
+        entry_reasoning: str = "",
+        exit_reasoning: str = "",
     ) -> str | None:
         # Try Uniswap V3 first, fall back to Aerodrome
         dex_used = "uniswap_v3"
@@ -252,6 +277,7 @@ class Executor:
                         take_profit_pct=take_profit_pct,
                         stop_loss_pct=stop_loss_pct,
                         max_hold_hours=max_hold_hours,
+                        reasoning=entry_reasoning,
                     )
                     logger.info(f"Position opened: {amount_out_tokens:.6f} {token_out_symbol} @ ${token_out_price_usd:.4f}")
 
@@ -269,6 +295,7 @@ class Executor:
                             f"P&L: ${r['gain_loss_usd']:+.2f} ({r['gain_loss_pct']:+.2f}%) | "
                             f"Held {r['hold_days']} days ({r['term']}-term)"
                         )
+                        _record_trade_postmortem(r, exit_reasoning)
 
         except Exception as e:
             logger.warning(f"Could not confirm receipt for {tx_hash}: {e}")
