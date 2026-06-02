@@ -157,6 +157,16 @@ HTML = """
       <div class="sub">${{ "%.2f"|format(stats.eth_balance * stats.eth_price) }}</div>
       <div class="sub2">{{ 'LOW — top up' if stats.eth_balance < 0.005 else 'Base network' }}</div>
     </div>
+    <div class="card">
+      <div class="label">Open Positions</div>
+      <div class="value {{ 'pos' if stats.open_positions > 0 else '' }}">{{ stats.open_positions }}</div>
+      <div class="sub">Active trades</div>
+    </div>
+    <div class="card">
+      <div class="label">Closed Trades</div>
+      <div class="value">{{ stats.total_trades }}</div>
+      <div class="sub">All time</div>
+    </div>
   </div>
 
   <!-- ROW 2: P&L & TAXES -->
