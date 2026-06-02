@@ -6,7 +6,7 @@ from bot.config import ANTHROPIC_API_KEY, TOKENS, MAX_DEPLOY_USD, MIN_TRADE_USD,
 from bot.portfolio import Portfolio
 from bot.executor import Executor
 from bot.logger import setup_logger
-from bot import history, wiki, positions, blacklist, token_cache
+from bot import history, wiki, positions, blacklist, token_cache, knowledge
 from bot.cost_tracker import record_anthropic
 from bot.screener import get_screening_report
 from bot.evaluator import score_coin, format_report
@@ -156,6 +156,29 @@ TOOLS = [
             "required": ["token_in", "token_out", "amount_usd", "reasoning"],
         },
     },
+    {
+        "name": "add_knowledge",
+        "description": (
+            "Save a lasting observation to the knowledge base so it persists across runs. "
+            "Use this when you notice a repeatable pattern, a token's quirky behavior, a market insight, "
+            "or a warning about a risky asset. Categories: token, market, strategy, warning."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "category": {
+                    "type": "string",
+                    "enum": ["token", "market", "strategy", "warning"],
+                    "description": "token=specific coin notes, market=macro patterns, strategy=what works/doesn't, warning=red flags",
+                },
+                "content": {
+                    "type": "string",
+                    "description": "The observation to save. Be specific and actionable.",
+                },
+            },
+            "required": ["category", "content"],
+        },
+    },
 ]
 
 
@@ -250,11 +273,45 @@ class TradingAgent:
             if n < 2:
                 lines.append(f"  {sym}: insufficient history ({n} data points — building up)")
                 continue
-            rsi = f"RSI={ind['rsi_14']}" if ind["rsi_14"] else "RSI=n/a"
+            rsi   = f"RSI={ind['rsi_14']}" if ind["rsi_14"] else "RSI=n/a"
             trend = ind["trend"] or "n/a"
-            m1h = f"{ind['momentum_1h_pct']:+.2f}%" if ind["momentum_1h_pct"] is not None else "n/a"
-            m4h = f"{ind['momentum_4h_pct']:+.2f}%" if ind["momentum_4h_pct"] is not None else "n/a"
-            lines.append(f"  {sym}: {rsi} | trend={trend} | 1h={m1h} | 4h={m4h} ({n} pts)")
+            m1h   = f"{ind['momentum_1h_pct']:+.2f}%" if ind["momentum_1h_pct"] is not None else "n/a"
+            m4h   = f"{ind['momentum_4h_pct']:+.2f}%" if ind["momentum_4h_pct"] is not None else "n/a"
+            m24h  = f"{ind['momentum_24h_pct']:+.2f}%" if ind["momentum_24h_pct"] is not None else "n/a"
+            parts = [f"  {sym}: {rsi} | trend={trend} | 1h={m1h} | 4h={m4h} | 24h={m24h} ({n} pts)"]
+            macd = ind.get("macd")
+            if macd:
+                parts.append(
+                    f"    MACD: {macd['macd']:+.6f} | signal={macd['signal']:+.6f} | "
+                    f"hist={macd['histogram']:+.6f} | {macd['crossover']} crossover"
+                )
+            bb = ind.get("bollinger_bands")
+            if bb:
+                squeeze_note = " [SQUEEZE — breakout likely]" if bb["squeeze"] else ""
+                parts.append(
+                    f"    BB: upper={bb['upper']:.4f} mid={bb['mid']:.4f} lower={bb['lower']:.4f} "
+                    f"| width={bb['width_pct']:.1f}% | position={bb['position']:.2f} (0=lower,1=upper){squeeze_note}"
+                )
+            sr = ind.get("support_resistance")
+            if sr:
+                parts.append(
+                    f"    S/R: support={sr['support']:.4f} (+{sr['dist_to_support_pct']:.1f}% away) | "
+                    f"resistance={sr['resistance']:.4f} (-{sr['dist_to_resistance_pct']:.1f}% away)"
+                )
+            lines.extend(parts)
+
+        # BTC trend context — most alts follow BTC direction
+        btc_ind = indicators.get("cbBTC") or {}
+        btc_md  = snapshot.get("market_data", {}).get("cbBTC", {})
+        if btc_md or btc_ind.get("momentum_1h_pct") is not None:
+            btc_1h  = btc_md.get("change_1h", btc_ind.get("momentum_1h_pct", 0)) or 0
+            btc_24h = btc_md.get("change_24h", 0) or 0
+            btc_trend = btc_ind.get("trend", "n/a")
+            lines += [
+                "",
+                f"BTC market context: 1h {btc_1h:+.2f}% | 24h {btc_24h:+.2f}% | trend={btc_trend}",
+                "Note: broad alt weakness often follows BTC drops — factor this into entry timing.",
+            ]
 
         # Market momentum from CoinGecko (1h/24h change)
         market_data = snapshot.get("market_data", {})
@@ -282,6 +339,11 @@ class TradingAgent:
             lines += ["", "Analyst notes / upcoming catalysts (from notes.txt):"]
             for note in notes:
                 lines.append(f"  - {note}")
+
+        # Persistent knowledge base — patterns and observations saved from prior runs
+        kb = knowledge.get_summary()
+        if kb and kb != "No knowledge entries yet.":
+            lines += ["", "== KNOWLEDGE BASE (your accumulated observations) ==", kb]
 
         lines += [
             "",
@@ -385,6 +447,11 @@ class TradingAgent:
             logger.info(f"Evaluating coin: {cg_id}")
             evaluation = score_coin(cg_id)
             return format_report(evaluation)
+        if tool_name == "add_knowledge":
+            cat     = tool_input.get("category", "market")
+            content = tool_input.get("content", "")
+            logger.info(f"Saving knowledge [{cat}]: {content[:80]}")
+            return knowledge.add_entry(cat, content)
         return self._execute_tool(tool_input, snapshot)
 
     def _execute_tool(self, tool_input: dict, snapshot: dict) -> str:
