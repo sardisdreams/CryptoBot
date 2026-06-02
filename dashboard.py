@@ -265,7 +265,7 @@ HTML = """
       <tr>
         <th>Token</th><th>Amount</th><th>Entry</th><th>Current</th>
         <th>Cost</th><th>Value</th><th>P&L $</th><th>P&L %</th>
-        <th>Take Profit</th><th>Stop Loss</th><th>Window</th>
+        <th>Take Profit</th><th>TP Profit</th><th>Stop Loss</th><th>Window</th>
       </tr>
       {% for p in open_positions %}
       <tr>
@@ -285,6 +285,18 @@ HTML = """
           {% if p.cost_basis_usd > 0 %}{{ "%+.2f"|format(p.gain_loss_pct) }}%{% else %}—{% endif %}
         </td>
         <td class="tag-tp">{% if p.take_profit_price %}${{ "%.6f"|format(p.take_profit_price) }}<br>(+{{ p.take_profit_pct }}%){% else %}—{% endif %}</td>
+        <td>
+          {% if p.take_profit_price and p.entry_price > 0 and p.cost_basis_usd > 0 %}
+            {% set tp_profit = p.cost_basis_usd * p.take_profit_pct / 100 %}
+            {% set progress = [(p.current_price - p.entry_price) / (p.take_profit_price - p.entry_price) * 100, 0] | max %}
+            {% set progress = [progress, 100] | min %}
+            <span class="pos" style="font-size:0.8rem;font-weight:700;">+${{ "%.2f"|format(tp_profit) }}</span><br>
+            <div style="margin-top:4px;background:#22c55e22;border-radius:4px;height:6px;width:80px;">
+              <div style="background:#22c55e;height:6px;border-radius:4px;width:{{ "%.0f"|format(progress) }}%;"></div>
+            </div>
+            <span class="pos" style="font-size:0.65rem;">{{ "%.0f"|format(progress) }}%</span>
+          {% else %}—{% endif %}
+        </td>
         <td class="tag-sl">{% if p.stop_loss_price %}${{ "%.6f"|format(p.stop_loss_price) }}<br>(-{{ p.stop_loss_pct }}%){% else %}—{% endif %}</td>
         <td {% if p.hours_remaining is not none and p.hours_remaining < 4 %}class="warn"{% endif %}>
           {% if p.hours_remaining is not none %}{% if p.hours_remaining < 0 %}Expired{% else %}{{ p.hours_remaining }}h{% endif %}{% else %}—{% endif %}
