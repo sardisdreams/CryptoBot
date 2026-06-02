@@ -3,6 +3,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+BOT_VERSION = "v1.00"
+
 # Base chain
 BASE_CHAIN_ID = 8453
 BASE_RPC_URL = os.getenv("BASE_RPC_URL", "https://mainnet.base.org")

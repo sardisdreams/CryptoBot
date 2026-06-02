@@ -16,7 +16,7 @@ from bot.market import Market
 from bot.portfolio import Portfolio
 from bot.wallet import Wallet
 from bot.positions import get_position_summary, get_realized_summary
-from bot.config import BASE_RPC_URL, PRIVATE_KEY, TOKENS
+from bot.config import BASE_RPC_URL, PRIVATE_KEY, TOKENS, BOT_VERSION
 from bot.blacklist import block, unblock, get_all as get_blacklist
 from bot.cost_tracker import get_summary as get_cost_summary
 from flask import Flask, render_template_string, jsonify, request, redirect, request, redirect
@@ -118,6 +118,7 @@ HTML = """
   <h1>CryptoBot</h1>
   <span class="badge">LIVE</span>
   <span class="ver">v2.06</span>
+  <span class="ver">Bot {{ bot_version }}</span>
   <span class="refresh">Auto-refreshes every 60s &nbsp;|&nbsp; {{ stats.wallet_address[:8] }}...{{ stats.wallet_address[-6:] }}</span>
 </div>
 
@@ -621,6 +622,7 @@ def index():
         transactions=txns,
         watchlist=watchlist,
         cache_updated=cache_updated,
+        bot_version=BOT_VERSION,
     )
 
 
