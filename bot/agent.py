@@ -174,7 +174,7 @@ class TradingAgent:
         open_pos = positions.get_position_summary(snapshot.get("prices", {}))
         realized = positions.get_realized_summary()
 
-        currently_deployed = sum(p["current_value"] for p in open_pos)
+        currently_deployed = sum(p["cost_basis_usd"] for p in open_pos)
         deploy_remaining = max(0, MAX_DEPLOY_USD - currently_deployed)
         tier = self.current_tier
 
@@ -449,7 +449,7 @@ class TradingAgent:
 
         # Enforce total deployment cap
         open_pos = positions.get_position_summary(snapshot.get("prices", {}))
-        currently_deployed = sum(p["current_value"] for p in open_pos)
+        currently_deployed = sum(p["cost_basis_usd"] for p in open_pos)
         if token_in_sym in {"USDC", "USDT", "DAI"}:  # buying crypto
             if currently_deployed + amount_usd > MAX_DEPLOY_USD:
                 remaining = MAX_DEPLOY_USD - currently_deployed
