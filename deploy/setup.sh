@@ -8,8 +8,8 @@ echo "=== CryptoBot Server Setup ==="
 # System updates
 apt-get update -y && apt-get upgrade -y
 
-# Install Python 3.11, git, pip
-apt-get install -y python3.11 python3.11-venv python3-pip git ufw curl
+# Install Python, git, pip
+apt-get install -y python3 python3-venv python3-pip git ufw curl
 
 # Firewall — allow SSH and dashboard port only
 ufw allow OpenSSH
@@ -37,7 +37,7 @@ sudo -u cryptobot git clone "$REPO_URL" /opt/cryptobot/app
 # Set up Python virtual environment
 echo "=== Setting up Python environment ==="
 cd /opt/cryptobot/app
-sudo -u cryptobot python3.11 -m venv .venv
+sudo -u cryptobot python3 -m venv .venv
 sudo -u cryptobot .venv/bin/pip install --upgrade pip
 sudo -u cryptobot .venv/bin/pip install -r requirements.txt
 
