@@ -6,7 +6,7 @@ from bot.config import ANTHROPIC_API_KEY, TOKENS, MAX_DEPLOY_USD, MIN_TRADE_USD,
 from bot.portfolio import Portfolio
 from bot.executor import Executor
 from bot.logger import setup_logger
-from bot import history, wiki, positions, blacklist, token_cache, knowledge
+from bot import history, wiki, positions, blacklist, token_cache, knowledge, risk
 from bot.cost_tracker import record_anthropic
 from bot.screener import get_screening_report
 from bot.evaluator import score_coin, format_report
@@ -201,6 +201,8 @@ class TradingAgent:
         deploy_remaining = max(0, MAX_DEPLOY_USD - currently_deployed)
         tier = self.current_tier
 
+        trade_allowed, trade_block_reason = risk.can_open_trade(snapshot.get("total_usd", 0))
+
         lines = [
             f"Total portfolio value: ${snapshot['total_usd']:,.2f}",
             f"Performance tier: {tier.get('label','?')} | Total P&L: ${tier.get('total_pnl',0):+.2f}",
@@ -332,6 +334,12 @@ class TradingAgent:
             lines += ["", "Top Aerodrome pools by volume (Base DEX activity):"]
             for p in pools[:5]:
                 lines.append(f"  {p['pair']}: ${p['volume_usd']:,.0f} volume")
+
+        # Risk guard status
+        if not trade_allowed:
+            lines += ["", f"** RISK GUARD ACTIVE — DO NOT open new positions: {trade_block_reason} **"]
+        else:
+            lines += ["", "Risk guards: OK — new trades permitted"]
 
         # Manual catalyst notes
         notes = _read_notes()
@@ -636,6 +644,9 @@ class TradingAgent:
         # Record prices to build up history for technical indicators
         history.record_prices(context["prices"])
 
+        # Record portfolio value for drawdown tracking (once per day)
+        risk.record_portfolio_value(snapshot.get("total_usd", 0))
+
         # ── Mechanical exits (TP/SL/time) — run before AI, no reasoning needed ──
         exits = positions.check_mechanical_exits(context["prices"])
         for ex in exits:
@@ -652,7 +663,7 @@ class TradingAgent:
                 if token_info:
                     amount_wei = int(amt * (10 ** token_info["decimals"]))
                     price = context["prices"].get(sym, 0)
-                    self.executor.swap(
+                    tx = self.executor.swap(
                         token_in_address=token_info["address"],
                         token_in_symbol=sym,
                         token_in_decimals=token_info["decimals"],
@@ -663,6 +674,10 @@ class TradingAgent:
                         token_out_price_usd=1.0,
                         exit_reasoning=f"Mechanical {ex['exit_type']}: {reason}",
                     )
+                    # After partial TP: raise the remaining lot's TP so it doesn't
+                    # immediately re-trigger next tick
+                    if tx and ex["exit_type"] == "take_profit":
+                        positions.raise_take_profit(sym, ex.get("lot_id", ""), multiplier=1.5)
             # Time suggestion — just log it, agent will handle in its reasoning
             elif ex["exit_type"] == "time_suggestion":
                 snapshot["_time_exit_suggestions"] = snapshot.get("_time_exit_suggestions", [])

@@ -203,6 +203,20 @@ class Executor:
                     )
                     return None
 
+        # Gas cost check — skip trade if gas > 2% of trade size
+        if token_in_price_usd > 0:
+            current_gas_price = self.w3.eth.gas_price
+            gas_cost_eth = (GAS_LIMIT * current_gas_price) / 1e18
+            eth_price = token_in_price_usd if token_in_symbol == "WETH" else token_out_price_usd if token_out_symbol == "WETH" else price_eth_usd
+            gas_cost_usd = gas_cost_eth * eth_price if eth_price > 0 else 0
+            trade_usd = (amount_in_wei / 10 ** token_in_decimals) * token_in_price_usd
+            if gas_cost_usd > 0 and trade_usd > 0 and (gas_cost_usd / trade_usd) > 0.02:
+                logger.warning(
+                    f"Swap skipped: gas cost ${gas_cost_usd:.3f} is {gas_cost_usd/trade_usd:.1%} of trade "
+                    f"${trade_usd:.2f} — exceeds 2% threshold"
+                )
+                return None
+
         logger.info(f"Executing on {dex_used}: {amount_in_wei / 10**token_in_decimals:.6f} {token_in_symbol} -> {token_out_symbol}")
 
         # Execute on the DEX that gave us a quote

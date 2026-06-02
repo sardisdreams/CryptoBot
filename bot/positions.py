@@ -173,6 +173,24 @@ def close_position(
     return realized
 
 
+def raise_take_profit(symbol: str, lot_id: str, multiplier: float = 1.5):
+    """
+    After a partial TP exit, raise the remaining lot's TP by multiplier
+    so it doesn't immediately trigger again on the next tick.
+    """
+    all_positions = _load()
+    lots = all_positions.get(symbol, [])
+    for lot in lots:
+        if lot.get("id") == lot_id and lot.get("take_profit_price"):
+            old_tp = lot["take_profit_price"]
+            lot["take_profit_price"] = round(old_tp * multiplier, 6)
+            lot["take_profit_pct"]   = round(
+                (lot["take_profit_price"] / lot["entry_price_usd"] - 1) * 100, 2
+            )
+    all_positions[symbol] = lots
+    _save(all_positions)
+
+
 # ── Query helpers ─────────────────────────────────────────────────────────────
 
 def get_open_positions() -> dict:
