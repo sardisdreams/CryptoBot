@@ -117,7 +117,7 @@ HTML = """
 <div class="header">
   <h1>CryptoBot</h1>
   <span class="badge">LIVE</span>
-  <span class="ver">v2.06</span>
+  <span class="ver">v2.07</span>
   <span class="ver">Bot {{ bot_version }}</span>
   <span class="refresh">Auto-refreshes every 60s &nbsp;|&nbsp; {{ stats.wallet_address[:8] }}...{{ stats.wallet_address[-6:] }}</span>
 </div>
@@ -265,7 +265,7 @@ HTML = """
       <tr>
         <th>Token</th><th>Amount</th><th>Entry</th><th>Current</th>
         <th>Cost</th><th>Value</th><th>P&L $</th><th>P&L %</th>
-        <th>Take Profit</th><th>TP Profit</th><th>Stop Loss</th><th>Window</th>
+        <th>Take Profit</th><th>TP Profit</th><th>Stop Loss</th><th>SL Risk</th><th>Window</th>
       </tr>
       {% for p in open_positions %}
       <tr>
@@ -298,6 +298,18 @@ HTML = """
           {% else %}—{% endif %}
         </td>
         <td class="tag-sl">{% if p.stop_loss_price %}${{ "%.6f"|format(p.stop_loss_price) }}<br>(-{{ p.stop_loss_pct }}%){% else %}—{% endif %}</td>
+        <td>
+          {% if p.stop_loss_price and p.entry_price > 0 and p.cost_basis_usd > 0 %}
+            {% set sl_risk = p.cost_basis_usd * p.stop_loss_pct / 100 %}
+            {% set sl_progress = [(p.entry_price - p.current_price) / (p.entry_price - p.stop_loss_price) * 100, 0] | max %}
+            {% set sl_progress = [sl_progress, 100] | min %}
+            <span class="neg" style="font-size:0.8rem;font-weight:700;">-${{ "%.2f"|format(sl_risk) }}</span><br>
+            <div style="margin-top:4px;background:#ef444422;border-radius:4px;height:6px;width:80px;">
+              <div style="background:#ef4444;height:6px;border-radius:4px;width:{{ "%.0f"|format(sl_progress) }}%;"></div>
+            </div>
+            <span class="neg" style="font-size:0.65rem;">{{ "%.0f"|format(sl_progress) }}%</span>
+          {% else %}—{% endif %}
+        </td>
         <td {% if p.hours_remaining is not none and p.hours_remaining < 4 %}class="warn"{% endif %}>
           {% if p.hours_remaining is not none %}{% if p.hours_remaining < 0 %}Expired{% else %}{{ p.hours_remaining }}h{% endif %}{% else %}—{% endif %}
         </td>
