@@ -3,7 +3,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-BOT_VERSION = "v1.00"
+BOT_VERSION = "v1.01"
 
 # Base chain
 BASE_CHAIN_ID = 8453
