@@ -185,14 +185,26 @@ class Executor:
             return None
 
         # Price impact check — protect against near-zero liquidity pools
+        amount_in_usd = (amount_in_wei / 10 ** token_in_decimals) * token_in_price_usd if token_in_price_usd > 0 else 0
+
+        # Block buys when we have no reference price for the token we're buying
+        is_buy = token_in_symbol in STABLECOINS and token_out_symbol not in STABLECOINS
+        if is_buy and token_out_price_usd <= 0:
+            logger.warning(
+                f"Swap rejected: no reference price for {token_out_symbol}. "
+                f"Cannot verify execution quality without a market price."
+            )
+            return None
+
         if token_in_price_usd > 0 and token_out_price_usd > 0:
-            amount_in_usd   = (amount_in_wei / 10 ** token_in_decimals) * token_in_price_usd
             # Infer token_out decimals from amount
             for dec in [18, 8, 6]:
                 amount_out_tokens = amount_out / (10 ** dec)
                 amount_out_usd    = amount_out_tokens * token_out_price_usd
                 if amount_out_usd > 0.01:
                     break
+
+            # Standard price impact: are we getting fair value out?
             if amount_in_usd > 0:
                 price_impact = (amount_in_usd - amount_out_usd) / amount_in_usd
                 logger.info(f"Price impact: {price_impact:.1%} (in ${amount_in_usd:.2f} → out ${amount_out_usd:.2f})")
@@ -200,6 +212,20 @@ class Executor:
                     logger.warning(
                         f"Swap rejected: price impact {price_impact:.1%} exceeds {MAX_PRICE_IMPACT:.0%} max. "
                         f"Token likely has insufficient liquidity on Base."
+                    )
+                    return None
+
+            # Execution price check: compare on-chain implied price to CoinGecko reference.
+            # Catches cases where DEX pool price is completely disconnected from market.
+            if is_buy and amount_out_tokens > 0 and amount_in_usd > 0:
+                implied_price = amount_in_usd / amount_out_tokens
+                price_premium = (implied_price - token_out_price_usd) / token_out_price_usd
+                logger.info(f"Execution price check: implied ${implied_price:.6f} vs reference ${token_out_price_usd:.6f} ({price_premium:+.1%})")
+                if price_premium > 0.10:
+                    logger.warning(
+                        f"Swap rejected: on-chain price ${implied_price:.6f} is {price_premium:.1%} above "
+                        f"CoinGecko reference ${token_out_price_usd:.6f} for {token_out_symbol}. "
+                        f"Pool likely has near-zero liquidity on Base."
                     )
                     return None
 
