@@ -247,7 +247,7 @@ HTML = """
   <div class="row-label">Current Holdings</div>
   <div class="grid grid-pos">
     {% for p in open_positions %}
-    <div class="card" style="{% if p.gain_loss_pct >= 0 %}background:#1a3d28;border-color:#22c55e;{% else %}background:#3d1a1a;border-color:#ef4444;{% endif %}">
+    <div class="card" style="{% if p.gain_loss_pct >= 0 %}background:#1a3d28;border-color:#1e8a3a;{% else %}background:#3d1a1a;border-color:#c5221f;{% endif %}">
       <div class="label">
         {% if p.cg_url %}<a href="{{ p.cg_url }}" target="_blank" class="cglink">{{ p.symbol }}</a>
         {% else %}{{ p.symbol }}{% endif %}
