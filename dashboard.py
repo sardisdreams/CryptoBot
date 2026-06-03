@@ -94,6 +94,7 @@ HTML = """
   .section h2 { font-size: 0.78rem; font-weight: 700; color: #94a3b8;
                 text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 12px; }
   table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+  table.positions-table { font-size: 0.9rem; }
   th { text-align: left; padding: 7px 9px; color: #475569; font-weight: 600;
        font-size: 0.68rem; text-transform: uppercase; border-bottom: 1px solid #2d3748; }
   td { padding: 9px 9px; border-bottom: 1px solid #161824; color: #e2e8f0; vertical-align: top; }
@@ -274,11 +275,11 @@ HTML = """
   <div class="section" style="margin-top:16px">
     <h2>Open Positions — Detail</h2>
     {% if open_positions %}
-    <table>
+    <table class="positions-table">
       <tr>
         <th>Token</th><th>Amount</th><th>Entry</th><th>Current</th>
         <th>Cost</th><th>Value</th><th>P&L $</th><th>P&L %</th>
-        <th>Take Profit</th><th>TP Profit</th><th>Stop Loss</th><th>SL Risk</th><th>Window</th>
+        <th>TP Profit</th><th>SL Risk</th><th>Window</th>
       </tr>
       {% for p in open_positions %}
       <tr>
@@ -297,7 +298,6 @@ HTML = """
         <td class="{{ 'pos' if p.gain_loss_pct > 0 else 'neg' }}">
           {% if p.cost_basis_usd > 0 %}{{ "%+.2f"|format(p.gain_loss_pct) }}%{% else %}—{% endif %}
         </td>
-        <td class="tag-tp">{% if p.take_profit_price %}${{ "%.6f"|format(p.take_profit_price) }}<br>(+{{ p.take_profit_pct }}%){% else %}—{% endif %}</td>
         <td>
           {% if p.take_profit_price and p.entry_price > 0 and p.cost_basis_usd > 0 %}
             {% set tp_profit = p.cost_basis_usd * p.take_profit_pct / 100 %}
@@ -310,7 +310,6 @@ HTML = """
             <span class="pos" style="font-size:0.65rem;">{{ "%.0f"|format(progress) }}%</span>
           {% else %}—{% endif %}
         </td>
-        <td class="tag-sl">{% if p.stop_loss_price %}${{ "%.6f"|format(p.stop_loss_price) }}<br>(-{{ p.stop_loss_pct }}%){% else %}—{% endif %}</td>
         <td>
           {% if p.stop_loss_price and p.entry_price > 0 and p.cost_basis_usd > 0 %}
             {% set sl_risk = p.cost_basis_usd * p.stop_loss_pct / 100 %}
