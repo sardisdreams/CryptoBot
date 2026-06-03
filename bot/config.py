@@ -64,7 +64,7 @@ SWING_TARGETS = {
 }
 
 # Capital deployment limits
-MAX_DEPLOY_USD = 200.0    # never deploy more than this total across all open positions
+MAX_DEPLOY_USD = 320.0    # raised 2026-06-02: existing $254 + $65 authorized dip buying
 MIN_TRADE_USD  = 20.0     # minimum trade size (below this, gas isn't worth it)
 MAX_TRADE_USD  = 75.0     # max single trade size during testing phase
 
