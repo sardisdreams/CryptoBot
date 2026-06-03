@@ -17,6 +17,7 @@ from bot.portfolio import Portfolio
 from bot.wallet import Wallet
 from bot.positions import get_position_summary, get_realized_summary
 from bot.config import BASE_RPC_URL, PRIVATE_KEY, TOKENS, BOT_VERSION
+from bot import capital
 from bot.blacklist import block, unblock, get_all as get_blacklist
 from bot.cost_tracker import get_summary as get_cost_summary
 from flask import Flask, render_template_string, jsonify, request, redirect, request, redirect
@@ -167,6 +168,18 @@ HTML = """
       <div class="label">Closed Trades</div>
       <div class="value">{{ stats.total_trades }}</div>
       <div class="sub">All time</div>
+    </div>
+    <div class="card">
+      <div class="label">Capital Floor</div>
+      <div class="value sm">${{ "%.2f"|format(stats.capital_floor) }}</div>
+      <div class="sub">Protected reserve</div>
+      <div class="sub2">Max deploy: ${{ "%.2f"|format(stats.capital_max_deploy) }}</div>
+    </div>
+    <div class="card">
+      <div class="label">Withdrawable</div>
+      <div class="value sm pos">${{ "%.2f"|format(stats.capital_withdrawable) }}</div>
+      <div class="sub">Locked profits (10%)</div>
+      <div class="sub2">Base floor: $100</div>
     </div>
   </div>
 
@@ -634,6 +647,9 @@ def index():
         "anthropic_7d":         costs["anthropic_7d"],
         "total_costs":          costs["total_costs"],
         "net_profit":           round((realized["total_realized_gain_usd"] + unrealized) - costs["total_costs"], 2),
+        "capital_floor":        capital.get_floor(),
+        "capital_withdrawable": capital.get_withdrawable(),
+        "capital_max_deploy":   capital.get_max_deploy(total_usd),
     }
 
     return render_template_string(

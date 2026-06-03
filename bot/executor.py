@@ -10,6 +10,7 @@ from bot.logger import setup_logger
 from bot import recorder, positions, knowledge
 from bot.aerodrome import AerodromeRouter
 from bot.cost_tracker import record_gas
+from bot import capital
 
 logger = setup_logger("executor")
 
@@ -87,6 +88,11 @@ def _record_trade_postmortem(record: dict, exit_reasoning: str):
     cat = "strategy"
     knowledge.add_entry(cat, summary)
     logger.info(f"Trade post-mortem saved to knowledge base: {token} {gain_pct:+.1f}%")
+
+    # Lock 10% of any profit into the floor
+    if gain_usd > 0:
+        capital.lock_profit(gain_usd)
+        logger.info(f"Profit lock: +${gain_usd * 0.10:.2f} added to floor (floor now ${capital.get_floor():.2f})")
 
 
 class Executor:

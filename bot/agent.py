@@ -6,7 +6,7 @@ from bot.config import ANTHROPIC_API_KEY, TOKENS, MAX_DEPLOY_USD, MIN_TRADE_USD,
 from bot.portfolio import Portfolio
 from bot.executor import Executor
 from bot.logger import setup_logger
-from bot import history, wiki, positions, blacklist, token_cache, knowledge, risk
+from bot import history, wiki, positions, blacklist, token_cache, knowledge, risk, capital
 from bot.cost_tracker import record_anthropic
 from bot.screener import get_screening_report
 from bot.evaluator import score_coin, format_report
@@ -198,17 +198,24 @@ class TradingAgent:
         realized = positions.get_realized_summary()
 
         currently_deployed = sum(p["cost_basis_usd"] for p in open_pos)
-        deploy_remaining = max(0, MAX_DEPLOY_USD - currently_deployed)
         tier = self.current_tier
 
         trade_allowed, trade_block_reason = risk.can_open_trade(snapshot.get("total_usd", 0))
+        total_usd    = snapshot.get("total_usd", 0)
+        usdc_usd     = snapshot.get("holdings", {}).get("USDC", {}).get("value_usd", 0)
+        cap_summary  = capital.get_summary(total_usd, usdc_usd)
+        dyn_max_deploy = cap_summary["max_deploy"]
+        dyn_min_trade  = cap_summary["min_trade"]
+        dyn_max_trade  = cap_summary["max_trade"]
+        in_recovery    = cap_summary["in_recovery"]
 
         lines = [
-            f"Total portfolio value: ${snapshot['total_usd']:,.2f}",
+            f"Total portfolio value: ${total_usd:,.2f}",
             f"Performance tier: {tier.get('label','?')} | Total P&L: ${tier.get('total_pnl',0):+.2f}",
-            f"Deployment cap: ${currently_deployed:.2f} deployed of ${MAX_DEPLOY_USD:.0f} max "
-            f"(${deploy_remaining:.2f} available to deploy)",
-            f"Trade size limits: ${MIN_TRADE_USD:.0f}–${MAX_TRADE_USD:.0f} per trade",
+            f"Capital floor: ${cap_summary['floor']:.2f} (base ${cap_summary['base_floor']:.0f} + ${cap_summary['locked_profit']:.2f} locked profit) | Withdrawable: ${cap_summary['withdrawable']:.2f}",
+            f"Deployment: ${currently_deployed:.2f} deployed | Max deploy: ${dyn_max_deploy:.2f} (everything above floor) | Available: ${max(0, dyn_max_deploy - currently_deployed):.2f}",
+            f"Trade size: ${dyn_min_trade:.0f}–${dyn_max_trade:.0f} per trade (5–10% of portfolio)",
+            f"Recovery mode: {'YES — USDC below floor, no new trades' if in_recovery else 'No — trading permitted'}",
             f"Total realized gains: ${realized['total_realized_gain_usd']:+,.2f} "
             f"(short-term: ${realized['short_term_gain_usd']:+,.2f} | "
             f"long-term: ${realized['long_term_gain_usd']:+,.2f})",
@@ -513,25 +520,37 @@ class TradingAgent:
         if blacklist.is_blocked(token_out_sym):
             return f"{token_out_sym} is on your block list — trade cancelled"
 
+        # Dynamic capital limits
+        _total   = snapshot.get("total_usd", 0)
+        _usdc    = snapshot.get("holdings", {}).get("USDC", {}).get("value_usd", 0)
+        _cap     = capital.get_summary(_total, _usdc)
+        _min_t   = _cap["min_trade"]
+        _max_t   = _cap["max_trade"]
+        _max_dep = _cap["max_deploy"]
+
+        # Recovery mode — no new buys
+        if token_in_sym in {"USDC", "USDT", "DAI"} and _cap["in_recovery"]:
+            return f"Recovery mode: USDC reserve ${_usdc:.2f} is below floor ${_cap['floor']:.2f} — no new trades until recovered"
+
         # Enforce minimum trade size
-        if amount_usd < MIN_TRADE_USD:
-            return f"Trade too small: ${amount_usd:.2f} is below minimum ${MIN_TRADE_USD:.2f} (gas not worth it)"
+        if amount_usd < _min_t:
+            return f"Trade too small: ${amount_usd:.2f} is below minimum ${_min_t:.2f}"
 
         # Enforce maximum single trade size
-        if amount_usd > MAX_TRADE_USD:
-            amount_usd = MAX_TRADE_USD
-            logger.info(f"Trade capped at ${MAX_TRADE_USD:.0f} (testing phase limit)")
+        if amount_usd > _max_t:
+            amount_usd = _max_t
+            logger.info(f"Trade capped at ${_max_t:.0f} (dynamic max trade size)")
 
         # Enforce total deployment cap
         open_pos = positions.get_position_summary(snapshot.get("prices", {}))
         currently_deployed = sum(p["cost_basis_usd"] for p in open_pos)
         if token_in_sym in {"USDC", "USDT", "DAI"}:  # buying crypto
-            if currently_deployed + amount_usd > MAX_DEPLOY_USD:
-                remaining = MAX_DEPLOY_USD - currently_deployed
-                if remaining < MIN_TRADE_USD:
-                    return f"Deployment cap reached: ${currently_deployed:.2f} already deployed of ${MAX_DEPLOY_USD:.0f} max"
+            if currently_deployed + amount_usd > _max_dep:
+                remaining = _max_dep - currently_deployed
+                if remaining < _min_t:
+                    return f"Deployment cap reached: ${currently_deployed:.2f} deployed of ${_max_dep:.2f} max (floor: ${_cap['floor']:.2f})"
                 amount_usd = min(amount_usd, remaining)
-                logger.info(f"Trade reduced to ${amount_usd:.2f} to stay within ${MAX_DEPLOY_USD:.0f} cap")
+                logger.info(f"Trade reduced to ${amount_usd:.2f} to stay within dynamic cap ${_max_dep:.2f}")
 
         # Recalculate amount_wei after any cap adjustments
         amount_tokens = amount_usd / price_in
