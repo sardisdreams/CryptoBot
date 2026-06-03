@@ -243,8 +243,8 @@ HTML = """
     </div>
   </div>
 
-  <!-- ROW 3: POSITIONS I OWN -->
-  <div class="row-label">Positions I Own</div>
+  <!-- ROW 3: CURRENT HOLDINGS -->
+  <div class="row-label">Current Holdings</div>
   <div class="grid grid-pos">
     {% for p in open_positions %}
     <div class="card">
@@ -260,11 +260,6 @@ HTML = """
         {% if p.cost_basis_usd > 0 %}{{ "%+.2f"|format(p.gain_loss_pct) }}% &nbsp; ${{ "%+.2f"|format(p.gain_loss_usd) }}
         {% else %}Cost: ${{ "%.2f"|format(p.cost_basis_usd) }}{% endif %}
       </div>
-      <div class="sub2">
-        <span class="tag-tp">TP: {% if p.take_profit_price %}${{ "%.4f"|format(p.take_profit_price) }}{% else %}—{% endif %}</span>
-        &nbsp;
-        <span class="tag-sl">SL: {% if p.stop_loss_price %}${{ "%.4f"|format(p.stop_loss_price) }}{% else %}—{% endif %}</span>
-      </div>
     </div>
     {% else %}
     <div style="color:#475569;font-size:0.8rem;padding:8px 0">No open positions</div>
@@ -279,7 +274,7 @@ HTML = """
       <tr>
         <th>Token</th><th>Amount</th><th>Entry</th><th>Current</th>
         <th>Cost</th><th>Value</th><th>P&L $</th><th>P&L %</th>
-        <th>TP Profit</th><th>SL Risk</th><th>Window</th>
+        <th>Take Profit</th><th>TP Profit</th><th>Stop Loss</th><th>SL Risk</th><th>Window</th>
       </tr>
       {% for p in open_positions %}
       <tr>
@@ -298,6 +293,7 @@ HTML = """
         <td class="{{ 'pos' if p.gain_loss_pct > 0 else 'neg' }}">
           {% if p.cost_basis_usd > 0 %}{{ "%+.2f"|format(p.gain_loss_pct) }}%{% else %}—{% endif %}
         </td>
+        <td class="tag-tp">{% if p.take_profit_price %}${{ "%.6f"|format(p.take_profit_price) }}<br>(+{{ p.take_profit_pct }}%){% else %}—{% endif %}</td>
         <td>
           {% if p.take_profit_price and p.entry_price > 0 and p.cost_basis_usd > 0 %}
             {% set tp_profit = p.cost_basis_usd * p.take_profit_pct / 100 %}
@@ -310,6 +306,7 @@ HTML = """
             <span class="pos" style="font-size:0.65rem;">{{ "%.0f"|format(progress) }}%</span>
           {% else %}—{% endif %}
         </td>
+        <td class="tag-sl">{% if p.stop_loss_price %}${{ "%.6f"|format(p.stop_loss_price) }}<br>(-{{ p.stop_loss_pct }}%){% else %}—{% endif %}</td>
         <td>
           {% if p.stop_loss_price and p.entry_price > 0 and p.cost_basis_usd > 0 %}
             {% set sl_risk = p.cost_basis_usd * p.stop_loss_pct / 100 %}
