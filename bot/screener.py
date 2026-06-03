@@ -7,6 +7,28 @@ logger = setup_logger("screener")
 
 SSL = certifi.where()
 
+# Keywords that identify stablecoins, wrapped assets, and yield-bearing stables —
+# no profit potential for short-term trading
+_STABLE_KEYWORDS = {
+    "usd", "usdc", "usdt", "dai", "usds", "usdbc", "eurc", "usde",
+    "susd", "susds", "ausd", "frax", "lusd", "crvusd", "pyusd",
+    "wrapped", "staked", "bridged", "aave", "compound", "vault",
+    "cbeth", "weth", "weeth", "cbbtc", "wbtc",
+}
+
+def _is_stable_or_wrapped(symbol: str, name: str, cg_id: str) -> bool:
+    sym = symbol.lower()
+    nm  = name.lower()
+    cg  = cg_id.lower()
+    for kw in _STABLE_KEYWORDS:
+        if kw in sym or kw in cg:
+            return True
+    # Name-based: "USD", "Wrapped", "Staked", "Bridged", "Aave"
+    for kw in ("usd", "wrapped", "staked", "bridged", "aave v", "compound"):
+        if kw in nm:
+            return True
+    return False
+
 COINGECKO_MARKETS   = "https://api.coingecko.com/api/v3/coins/markets"
 COINGECKO_NEW       = "https://api.coingecko.com/api/v3/coins/list/new"
 COINGECKO_GAINERS   = "https://api.coingecko.com/api/v3/coins/top_gainers_losers"
@@ -39,6 +61,11 @@ def get_base_ecosystem_coins(min_market_cap: int = 5_000_000, max_market_cap: in
         for coin in coins:
             mc = coin.get("market_cap") or 0
             if mc < min_market_cap or mc > max_market_cap:
+                continue
+            sym   = coin.get("symbol", "")
+            name  = coin.get("name", "")
+            cg_id = coin.get("id", "")
+            if _is_stable_or_wrapped(sym, name, cg_id):
                 continue
             filtered.append({
                 "symbol":       coin.get("symbol", "").upper(),
