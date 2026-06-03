@@ -55,8 +55,8 @@ HTML = """
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-         background: #0f1117; color: #e2e8f0; min-height: 100vh; }
-  .header { background: #1a1d2e; border-bottom: 1px solid #2d3748;
+         background: #13161f; color: #e2e8f0; min-height: 100vh; }
+  .header { background: #1e2236; border-bottom: 1px solid #3d4a5c;
             padding: 16px 32px; display: flex; align-items: center; gap: 12px; }
   .header h1 { font-size: 1.3rem; font-weight: 700; color: #fff; }
   .badge { background: #22c55e22; color: #22c55e; border: 1px solid #22c55e44;
@@ -64,8 +64,8 @@ HTML = """
   .ver { background: #6366f122; color: #818cf8; border: 1px solid #6366f144;
          padding: 3px 10px; border-radius: 20px; font-size: 0.72rem; font-weight: 600; }
   /* Tabs */
-  .tabs { display: flex; gap: 0; border-bottom: 1px solid #2d3748;
-          background: #1a1d2e; padding: 0 32px; }
+  .tabs { display: flex; gap: 0; border-bottom: 1px solid #3d4a5c;
+          background: #1e2236; padding: 0 32px; }
   .tab  { padding: 12px 20px; font-size: 0.82rem; font-weight: 600; color: #64748b;
           cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.15s; }
   .tab:hover { color: #94a3b8; }
@@ -79,7 +79,7 @@ HTML = """
   .grid-top  { grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); }
   .grid-pnl  { grid-template-columns: repeat(auto-fill, minmax(155px, 1fr)); }
   .grid-pos  { grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); }
-  .card { background: #1a1d2e; border: 1px solid #2d3748; border-radius: 10px; padding: 14px 16px; }
+  .card { background: #1e2236; border: 1px solid #3d4a5c; border-radius: 10px; padding: 14px 16px; }
   .card .label { font-size: 0.68rem; color: #64748b; text-transform: uppercase;
                  letter-spacing: 0.05em; margin-bottom: 5px; }
   .card .value { font-size: 1.4rem; font-weight: 700; color: #fff; line-height: 1.2; }
@@ -89,17 +89,17 @@ HTML = """
   .pos { color: #22c55e; }
   .neg { color: #ef4444; }
   .warn{ color: #f59e0b; }
-  .section { background: #1a1d2e; border: 1px solid #2d3748; border-radius: 10px;
+  .section { background: #1e2236; border: 1px solid #3d4a5c; border-radius: 10px;
              padding: 16px 18px; margin-bottom: 14px; }
   .section h2 { font-size: 0.78rem; font-weight: 700; color: #94a3b8;
                 text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 12px; }
   table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
   table.positions-table { font-size: 0.9rem; }
   th { text-align: left; padding: 7px 9px; color: #475569; font-weight: 600;
-       font-size: 0.68rem; text-transform: uppercase; border-bottom: 1px solid #2d3748; }
-  td { padding: 9px 9px; border-bottom: 1px solid #161824; color: #e2e8f0; vertical-align: top; }
+       font-size: 0.68rem; text-transform: uppercase; border-bottom: 1px solid #3d4a5c; }
+  td { padding: 9px 9px; border-bottom: 1px solid #2a3347; color: #e2e8f0; vertical-align: top; }
   tr:last-child td { border-bottom: none; }
-  tr:hover td { background: #1e2235; }
+  tr:hover td { background: #252840; }
   .pill { display: inline-block; padding: 2px 7px; border-radius: 9px; font-size: 0.68rem; font-weight: 600; }
   .pill.success { background: #22c55e22; color: #22c55e; }
   .pill.failed  { background: #ef444422; color: #ef4444; }
