@@ -119,7 +119,7 @@ HTML = """
 <div class="header">
   <h1>CryptoBot</h1>
   <span class="badge">LIVE</span>
-  <span class="ver">v2.07</span>
+  <span class="ver">v2.08</span>
   <span class="ver">Bot {{ bot_version }}</span>
   <span class="refresh">Auto-refreshes every 60s &nbsp;|&nbsp; {{ stats.wallet_address[:8] }}...{{ stats.wallet_address[-6:] }}</span>
 </div>
