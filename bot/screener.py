@@ -36,7 +36,7 @@ DEFILLAMA_CHAINS    = "https://api.llama.fi/chains"
 DEFILLAMA_PROTOCOLS = "https://api.llama.fi/protocols"
 
 
-def get_base_ecosystem_coins(min_market_cap: int = 5_000_000, max_market_cap: int = 500_000_000) -> list[dict]:
+def get_base_ecosystem_coins(min_market_cap: int = 5_000_000, max_market_cap: int = 2_000_000_000) -> list[dict]:
     """
     Find coins in the Base ecosystem within a market cap range.
     Targets the $5M–$500M sweet spot for meaningful upside.

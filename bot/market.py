@@ -12,6 +12,8 @@ COINGECKO_IDS = {
     "DAI":   "dai",
     "cbBTC": "coinbase-wrapped-btc",
     "cbETH": "coinbase-wrapped-staked-eth",
+    "VVV":   "venice-token",
+    "AERO":  "aerodrome-finance",
 }
 
 COINGECKO_MARKETS  = "https://api.coingecko.com/api/v3/coins/markets"
