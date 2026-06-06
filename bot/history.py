@@ -290,6 +290,127 @@ def get_all_indicators(symbols: list[str]) -> dict[str, dict]:
     return {sym: get_indicators(sym) for sym in symbols}
 
 
+def get_correlation(sym_a: str, sym_b: str, lookback: int = 20) -> float | None:
+    """
+    Pearson correlation coefficient between two tokens over recent price history.
+    Returns -1.0 to 1.0. Values > 0.7 indicate high positive correlation.
+    """
+    import math
+    prices_a = get_prices(sym_a)[-lookback:]
+    prices_b = get_prices(sym_b)[-lookback:]
+    n = min(len(prices_a), len(prices_b))
+    if n < 10:
+        return None
+    prices_a = prices_a[-n:]
+    prices_b = prices_b[-n:]
+
+    # Compute returns (% changes) instead of raw prices
+    def returns(prices):
+        return [(prices[i] - prices[i-1]) / prices[i-1]
+                for i in range(1, len(prices)) if prices[i-1] != 0]
+
+    ra = returns(prices_a)
+    rb = returns(prices_b)
+    n  = min(len(ra), len(rb))
+    if n < 5:
+        return None
+    ra, rb = ra[-n:], rb[-n:]
+
+    mean_a = sum(ra) / n
+    mean_b = sum(rb) / n
+    cov    = sum((ra[i] - mean_a) * (rb[i] - mean_b) for i in range(n)) / n
+    std_a  = math.sqrt(sum((x - mean_a) ** 2 for x in ra) / n)
+    std_b  = math.sqrt(sum((x - mean_b) ** 2 for x in rb) / n)
+
+    if std_a == 0 or std_b == 0:
+        return None
+    return round(cov / (std_a * std_b), 3)
+
+
+def get_portfolio_correlations(symbols: list[str]) -> list[dict]:
+    """
+    Compute pairwise correlations for a list of held symbols.
+    Returns pairs with correlation > 0.6 as warnings.
+    """
+    warnings = []
+    for i in range(len(symbols)):
+        for j in range(i + 1, len(symbols)):
+            corr = get_correlation(symbols[i], symbols[j])
+            if corr is not None and corr > 0.6:
+                warnings.append({
+                    "sym_a": symbols[i],
+                    "sym_b": symbols[j],
+                    "correlation": corr,
+                    "risk": "HIGH" if corr > 0.85 else "MEDIUM",
+                })
+    return warnings
+
+
+def build_ohlcv_candles(symbol: str, candle_points: int = 8) -> list[dict]:
+    """
+    Build synthetic OHLCV candles from stored price snapshots.
+    candle_points=8 → 4h candles (8 x 30min snapshots).
+    candle_points=2 → 1h candles.
+    Returns list of {open, high, low, close, index} oldest first.
+    """
+    history = _load()
+    entries = history.get(symbol, [])
+    if len(entries) < candle_points * 2:
+        return []
+
+    candles = []
+    for i in range(0, len(entries) - candle_points + 1, candle_points):
+        chunk = entries[i : i + candle_points]
+        prices = [e["price"] for e in chunk if e.get("price", 0) > 0]
+        if not prices:
+            continue
+        candles.append({
+            "open":  prices[0],
+            "high":  max(prices),
+            "low":   min(prices),
+            "close": prices[-1],
+            "ts":    chunk[0].get("ts", ""),
+        })
+    return candles
+
+
+def get_candle_indicators(symbol: str) -> dict:
+    """
+    Compute indicators using proper OHLCV candles for better accuracy.
+    Returns ATR and Supertrend values.
+    """
+    candles = build_ohlcv_candles(symbol, candle_points=2)  # 1h candles
+    if len(candles) < 14:
+        return {}
+
+    # ATR (Average True Range) from candles
+    trs = []
+    for i in range(1, len(candles)):
+        high = candles[i]["high"]
+        low  = candles[i]["low"]
+        prev_close = candles[i-1]["close"]
+        tr = max(high - low, abs(high - prev_close), abs(low - prev_close))
+        trs.append(tr)
+
+    atr14 = sum(trs[-14:]) / 14 if len(trs) >= 14 else sum(trs) / len(trs) if trs else 0
+    current_price = candles[-1]["close"]
+
+    # Chandelier Exit (trailing stop concept)
+    highest_close = max(c["close"] for c in candles[-14:])
+    chandelier_stop = round(highest_close - 3 * atr14, 6)
+
+    # Volatility as ATR % of price
+    atr_pct = round(atr14 / current_price * 100, 2) if current_price > 0 else 0
+
+    return {
+        "atr":             round(atr14, 6),
+        "atr_pct":         atr_pct,
+        "chandelier_stop": chandelier_stop,
+        "candle_count":    len(candles),
+        "regime":          "high_vol" if atr_pct > 5 else "low_vol",
+    }
+
+
 def get_market_regime(btc_indicators: dict, fear_greed_value: int) -> dict:
     """
     Classify current market regime using BTC technicals and Fear & Greed.

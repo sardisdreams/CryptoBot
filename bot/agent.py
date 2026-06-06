@@ -177,8 +177,17 @@ If either returns "rate limited" — skip that coin this tick, do not retry.
 - Gas cost >2% of trade size: trade blocked automatically.
 - Daily drawdown >10%: no new trades until next day.
 - Win rate <40% over last 10 trades: hold cash, reassess strategy.
+- Max 5 simultaneous positions: no new entries until one closes.
+- Stop-out cooldown: 30min no re-entry after being stopped out of a token.
 
-Always reason step by step. Act with conviction. You have full authority to manage this portfolio."""
+## Confidence requirement (STRICTLY ENFORCED)
+Every trade must include a confidence score (1-10) in execute_swap.
+- 8-10: Strong signal, multiple confirming indicators, act decisively.
+- 6-7: Reasonable setup, moderate conviction, acceptable to trade.
+- 1-5: Unclear signal, weak setup, insufficient data. DO NOT TRADE. Hold cash instead.
+Trades with confidence < 6 are automatically blocked. Be honest — if you're unsure, score low.
+
+Always reason step by step. Act with conviction where warranted. You have full authority to manage this portfolio."""
 
 TOOLS = [
     {
@@ -221,8 +230,9 @@ TOOLS = [
                 "max_hold_hours":     {"type": "number",  "description": "Hours before starting to look for exit (default 48). Soft suggestion, not forced."},
                 "reasoning":          {"type": "string",  "description": "Why you are making this trade"},
                 "token_out_cg_id":    {"type": "string",  "description": "CoinGecko ID of token being bought (e.g. 'venice-token'). Always provide when buying a non-standard token so it can be tracked for future pricing."},
+                "confidence":         {"type": "integer", "description": "Your conviction score 1-10. Trades with confidence < 6 are blocked. Be honest: 8-10=strong signal, 6-7=reasonable, 1-5=do not trade."},
             },
-            "required": ["token_in", "token_out", "amount_usd", "reasoning"],
+            "required": ["token_in", "token_out", "amount_usd", "reasoning", "confidence"],
         },
     },
     {
@@ -364,6 +374,10 @@ class TradingAgent:
         # Technical indicators from price history
         crypto_symbols = [s for s in TOKENS if s not in {"USDC", "USDT", "DAI"}]
         indicators = history.get_all_indicators(crypto_symbols)
+
+        # ATR-based candle indicators for key tracked tokens
+        candle_ind = {sym: history.get_candle_indicators(sym)
+                      for sym in ["VVV", "AERO", "WETH", "cbBTC"]}
         lines += ["", "Technical indicators (from stored price history):"]
         for sym, ind in indicators.items():
             n = ind["data_points"]
@@ -407,6 +421,28 @@ class TradingAgent:
                 div_note = f" *** {obv['divergence'].upper()} DIVERGENCE ***" if obv.get("divergence") else ""
                 parts.append(f"    OBV: trend={obv['obv_trend']}{div_note}")
             lines.extend(parts)
+
+        # Position correlation warnings
+        if open_pos:
+            held_syms = [p["symbol"] for p in open_pos if p.get("symbol") not in {"USDC","USDT","DAI"}]
+            if len(held_syms) >= 2:
+                corr_warnings = history.get_portfolio_correlations(held_syms)
+                if corr_warnings:
+                    lines += ["", "** CORRELATION WARNINGS — correlated positions amplify losses if market drops: **"]
+                    for w in corr_warnings:
+                        lines.append(f"  {w['sym_a']} & {w['sym_b']}: r={w['correlation']:.2f} [{w['risk']} correlation] — avoid adding more correlated exposure")
+
+        # ATR volatility context for position sizing
+        atr_lines = []
+        for sym, ci in candle_ind.items():
+            if ci and ci.get("atr_pct"):
+                atr_lines.append(
+                    f"  {sym}: ATR={ci['atr_pct']:.1f}% [{ci['regime']}] | "
+                    f"Chandelier stop=${ci['chandelier_stop']:.4f}"
+                )
+        if atr_lines:
+            lines += ["", "ATR volatility (use for position sizing — higher ATR = smaller size):"]
+            lines.extend(atr_lines)
 
         # BTC trend context — most alts follow BTC direction
         btc_ind = indicators.get("cbBTC") or {}
@@ -506,6 +542,11 @@ class TradingAgent:
         return "\n".join(lines)
 
     def _get_token_info(self, cg_id: str) -> str:
+        # Sanitize cg_id — must be alphanumeric with hyphens only (CoinGecko ID format)
+        import re
+        if not cg_id or not re.match(r'^[a-z0-9\-]{1,80}$', cg_id):
+            return f"Invalid CoinGecko ID format: '{cg_id}'. IDs must be lowercase alphanumeric with hyphens."
+
         # Check local cache first — avoids CoinGecko API call entirely
         cached = token_cache.get(cg_id)
         if cached:
@@ -592,8 +633,15 @@ class TradingAgent:
         token_out_sym = tool_input["token_out"].upper()
         amount_usd    = float(tool_input["amount_usd"])
         reasoning     = tool_input.get("reasoning", "")
+        confidence    = int(tool_input.get("confidence", 5))
 
-        logger.info(f"Agent decision: {token_in_sym} → {token_out_sym} | ${amount_usd:.2f} | {reasoning}")
+        logger.info(f"Agent decision: {token_in_sym} → {token_out_sym} | ${amount_usd:.2f} | confidence={confidence}/10 | {reasoning}")
+
+        # Confidence gate — block low-conviction trades when buying
+        is_buy = token_in_sym in {"USDC", "USDT", "DAI"}
+        if is_buy and confidence < 6:
+            logger.info(f"Trade blocked: confidence {confidence}/10 below threshold (6). Holding cash.")
+            return f"Trade skipped: confidence score {confidence}/10 is below the minimum threshold of 6. Conditions are unclear — holding cash is the right call."
 
         # ETH alias
         if token_in_sym == "ETH":  token_in_sym = "WETH"

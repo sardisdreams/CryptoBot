@@ -11,6 +11,7 @@ from bot import recorder, positions, knowledge
 from bot.aerodrome import AerodromeRouter
 from bot.cost_tracker import record_gas
 from bot import capital, risk as risk_mod
+from bot.thegraph import check_pool_liquidity
 
 logger = setup_logger("executor")
 
@@ -144,6 +145,22 @@ def _record_trade_postmortem(record: dict, exit_reasoning: str):
         logger.info(f"Stop-out cooldown started for {token} ({risk_mod.COOLDOWN_MINUTES}min)")
 
 
+def _validate_address(address: str, label: str = "") -> bool:
+    """Validate an Ethereum address before using it in a transaction."""
+    if not address or not isinstance(address, str):
+        logger.warning(f"Invalid address (empty): {label}")
+        return False
+    if not address.startswith("0x") or len(address) != 42:
+        logger.warning(f"Invalid address format: {address} ({label})")
+        return False
+    try:
+        int(address, 16)
+        return True
+    except ValueError:
+        logger.warning(f"Invalid address (non-hex): {address} ({label})")
+        return False
+
+
 class Executor:
     def __init__(self, w3: Web3, wallet: Wallet):
         self.w3 = w3
@@ -193,7 +210,7 @@ class Executor:
         gas_price = self.w3.eth.gas_price
         tx = token.functions.approve(
             Web3.to_checksum_address(UNISWAP_V3_ROUTER),
-            2**256 - 1,  # max approval
+            amount_wei,  # exact amount only — never grant unlimited approval
         ).build_transaction({
             "from": self.wallet.address,
             "gas": 100_000,
@@ -223,6 +240,15 @@ class Executor:
         exit_reasoning: str = "",
         cg_id: str = "",
     ) -> str | None:
+        # Validate addresses before doing anything — prevents malformed addresses from reaching blockchain
+        if not _validate_address(token_in_address, f"token_in:{token_in_symbol}"):
+            return None
+        if not _validate_address(token_out_address, f"token_out:{token_out_symbol}"):
+            return None
+        if amount_in_wei <= 0:
+            logger.warning("Swap rejected: amount_in_wei must be positive")
+            return None
+
         # Try Uniswap V3 first, fall back to Aerodrome
         dex_used = "uniswap_v3"
         amount_out = self.get_quote(token_in_address, token_out_address, amount_in_wei, fee)
@@ -298,6 +324,15 @@ class Executor:
                     f"${trade_usd:.2f} — exceeds 2% threshold"
                 )
                 return None
+
+        # TheGraph liquidity check for buys — ensures pool has enough depth
+        if is_buy and token_out_address:
+            trade_usd_est = (amount_in_wei / 10 ** token_in_decimals) * (token_in_price_usd or 1)
+            graph_check = check_pool_liquidity(token_out_address, trade_usd_est)
+            if not graph_check["ok"]:
+                logger.warning(f"TheGraph liquidity check failed: {graph_check['reason']}")
+                # Don't hard-block — TheGraph can be wrong. Log as warning and continue.
+                # The on-chain quote and price impact check will catch bad pools.
 
         logger.info(f"Executing on {dex_used}: {amount_in_wei / 10**token_in_decimals:.6f} {token_in_symbol} -> {token_out_symbol}")
 

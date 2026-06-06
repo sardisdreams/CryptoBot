@@ -159,7 +159,7 @@ class AerodromeRouter:
         logger.info(f"Approving Aerodrome router for {token_address}")
         gas_price = self.w3.eth.gas_price
         tx = token.functions.approve(
-            Web3.to_checksum_address(AERODROME_ROUTER), 2**256 - 1
+            Web3.to_checksum_address(AERODROME_ROUTER), amount_wei  # exact amount — no unlimited approval
         ).build_transaction({
             "from": self.wallet.address,
             "gas": 100_000,

@@ -16,8 +16,16 @@ from bot.market import Market
 from bot.portfolio import Portfolio
 from bot.wallet import Wallet
 from bot.positions import get_position_summary, get_realized_summary
-from bot.config import BASE_RPC_URL, PRIVATE_KEY, TOKENS, BOT_VERSION
+from bot.config import BASE_RPC_URL, TOKENS, BOT_VERSION
 from bot import capital, knowledge as knowledge_module
+
+def _get_wallet_address() -> str:
+    """Derive wallet address from private key without holding the key in module scope."""
+    from eth_account import Account as _Account
+    from bot.config import PRIVATE_KEY as _PK
+    if not _PK:
+        return "0x0000000000000000000000000000000000000000"
+    return _Account.from_key(_PK).address
 from bot.blacklist import block, unblock, get_all as get_blacklist
 from bot.cost_tracker import get_summary as get_cost_summary
 from flask import Flask, render_template_string, jsonify, request, redirect, request, redirect
@@ -119,7 +127,7 @@ HTML = """
 <div class="header">
   <h1>CryptoBot</h1>
   <span class="badge">LIVE</span>
-  <span class="ver">v2.11</span>
+  <span class="ver">v2.12</span>
   <span class="ver">Bot {{ bot_version }}</span>
   <span class="refresh">Auto-refreshes every 60s &nbsp;|&nbsp; {{ stats.wallet_address[:8] }}...{{ stats.wallet_address[-6:] }}</span>
 </div>
@@ -704,8 +712,7 @@ def index():
     market = Market()
     prices = market.get_all_prices()
 
-    from eth_account import Account
-    wallet_address = Account.from_key(PRIVATE_KEY).address
+    wallet_address = _get_wallet_address()
 
     balances   = _get_full_balances(w3, wallet_address, prices)
     realized   = get_realized_summary()
@@ -862,23 +869,27 @@ def index():
 
 
 @app.route("/block", methods=["POST"])
+@require_auth
 def block_token():
     symbol = request.form.get("symbol", "").upper()
     cg_id  = request.form.get("cg_id", "")
-    if symbol:
+    # Validate symbol — only allow alphanumeric to prevent injection
+    if symbol and symbol.isalnum():
         block(symbol, cg_id, reason="User blocked via dashboard")
     return redirect("/")
 
 
 @app.route("/unblock", methods=["POST"])
+@require_auth
 def unblock_token():
     symbol = request.form.get("symbol", "").upper()
-    if symbol:
+    if symbol and symbol.isalnum():
         unblock(symbol)
     return redirect("/")
 
 
 @app.route("/api/summary")
+@require_auth
 def api_summary():
     market = Market()
     prices = market.get_all_prices()
