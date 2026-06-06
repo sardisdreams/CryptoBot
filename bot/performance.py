@@ -10,11 +10,11 @@ logger = setup_logger("performance")
 
 # Tier definitions: (min_profit_usd, label, interval_seconds, sonnet_threshold_pct, always_sonnet)
 TIERS = [
-    (-999999, "CONSERVE",  1800, 5.0, False),  # loss or flat   → 30min, Sonnet at 5%+
-    (10,      "CAUTIOUS",  1800, 4.0, False),  # +$10           → 30min, Sonnet at 4%+
-    (50,      "ACTIVE",    1200, 3.0, False),  # +$50           → 20min, Sonnet at 3%+
-    (100,     "AGGRESSIVE", 900, 2.0, False),  # +$100          → 15min, Sonnet at 2%+
-    (200,     "FULL",       600, 1.5, True),   # +$200          → 10min, always Sonnet
+    (-999999, "CONSERVE",  3600, 5.0, False),  # loss or flat   → 60min, Haiku preferred
+    (10,      "CAUTIOUS",  2700, 4.0, False),  # +$10           → 45min
+    (50,      "ACTIVE",    1800, 3.0, False),  # +$50           → 30min
+    (100,     "AGGRESSIVE",1200, 2.0, False),  # +$100          → 20min
+    (200,     "FULL",       900, 1.5, True),   # +$200          → 15min, always Sonnet
 ]
 
 
