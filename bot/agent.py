@@ -27,67 +27,104 @@ def _read_notes() -> list[str]:
                 lines.append(line)
     return lines
 
-SYSTEM_PROMPT = f"""You are an autonomous crypto trading agent operating on the Base blockchain.
 
-Your goal is to find and execute short-term trading opportunities — hours to a few days, not weeks.
-This is NOT a buy-and-hold portfolio. Get in, capture the move, get back to USDC.
+def _refresh_held_token_prices(prices: dict):
+    """
+    For every open position not in the main market feed, fetch a fresh price
+    from CoinGecko and update the token cache so portfolio and mechanical exits
+    have accurate prices. Skips tokens already priced this cycle.
+    """
+    import requests, certifi
+    open_pos = positions.get_open_positions()
+    cg_ids_to_fetch = []
+    for sym, lots in open_pos.items():
+        if sym in prices and prices[sym] > 0:
+            continue  # already priced
+        for lot in lots:
+            cg_id = lot.get("cg_id", "")
+            if cg_id and cg_id not in cg_ids_to_fetch:
+                cg_ids_to_fetch.append(cg_id)
+                break
+    if not cg_ids_to_fetch:
+        return
+    try:
+        resp = requests.get(
+            "https://api.coingecko.com/api/v3/simple/price",
+            params={"ids": ",".join(cg_ids_to_fetch), "vs_currencies": "usd"},
+            timeout=8,
+            verify=certifi.where(),
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        for cg_id, price_data in data.items():
+            price = price_data.get("usd", 0)
+            if price > 0:
+                cached = token_cache.get(cg_id)
+                if cached:
+                    cached["price"] = price
+                    token_cache.store(
+                        cg_id, cached["address"], cached["decimals"],
+                        cached["name"], price, cached.get("symbol", "")
+                    )
+                    logger.info(f"Refreshed price for {cg_id}: ${price:.6f}")
+    except Exception as e:
+        logger.warning(f"Could not refresh held token prices: {e}")
 
-## Capital rules (strict)
-- Total deployed capital across ALL open positions: max ${MAX_DEPLOY_USD:.0f}
-- Single trade size: ${MIN_TRADE_USD:.0f}–${MAX_TRADE_USD:.0f}
-- The remaining ~$300 USDC stays as reserve — do not touch it
-- Always keep at least 0.005 ETH for gas
-- These limits exist because we are in testing phase — respect them exactly
+SYSTEM_PROMPT = f"""You are a fully autonomous crypto trading agent on the Base blockchain. You operate without human supervision. Make all trading decisions independently using the data provided each tick.
+
+## Your mission
+Grow the portfolio through disciplined short-term trading. Protect capital first, grow it second. Every decision — entry, exit, position sizing — is yours to make.
+
+## Capital management (dynamic — read from prompt each tick)
+- Capital floor: a protected reserve you never touch. Displayed each tick.
+- Max deploy: everything above the floor can be deployed across open positions.
+- Trade size: 5–10% of total portfolio per trade (shown each tick).
+- Always keep at least 0.005 ETH for gas — never trade it.
+- Recovery mode: if USDC drops below the floor, hold cash, make NO new entries until recovered.
 
 ## Trading style
-- Short-term swing trades: target hold time is hours to 2-3 days maximum
-- Exit when the momentum that got you in starts fading — don't wait for the "full move"
-- Frequent small wins beat rare big wins
-- If a trade isn't working within a few hours, exit and redeploy elsewhere
-- Do NOT hold hoping for recovery — cut losses quickly (25% down = exit)
+- Short-term swing trades: hours to 2–3 days maximum.
+- Get in on a clear setup, capture the move, exit back to USDC. No long-term holds.
+- Frequent small wins beat chasing big gains.
+- Exit when the thesis breaks — do not hope for recovery.
 
-## Primary targets
-- Base-native coins with real projects, $5M–$500M market cap
-- ETH/cbBTC: only if a clear short-term technical setup appears
-- Always sell back to USDC after closing — never rotate directly between crypto assets
-
-## Finding opportunities
-Each tick you receive prices, RSI, momentum, volume, TVL data, trending tokens, and analyst notes.
-One strong signal is enough to act. RSI informs your view but is not a hard requirement.
-
-### The 5 entry setups to look for:
+## Entry setups (in order of reliability)
 
 **Setup 1 — Momentum Continuation**
-Token showing >2% positive 1h momentum with above-average volume and RSI below 70.
-The move has conviction and room to run. Buy 5–15%.
+>2% positive 1h momentum, above-average volume, RSI below 70. The move has conviction.
 
 **Setup 2 — Dip Recovery**
-Token down 5–15% over 24h but 1h momentum turning positive. RSI below 50.
-Buyers stepping in after a sell-off. Buy 10% on the turn.
-Warning: if 1h stalls again, exit — don't catch a falling knife.
+Down 5–15% in 24h but 1h momentum just turned positive. RSI below 50. Buyers stepping in.
+Warning: if 1h stalls again, exit immediately — don't catch a falling knife.
 
 **Setup 3 — Catalyst Trade**
-Upcoming event in analyst notes (emission change, launch, listing, partnership).
-Enter before the event, sell into the reaction regardless of how it feels.
-Buy 10–15% if liquidity is sufficient.
+Upcoming event in analyst notes (listing, partnership, emission change). Enter before, sell into the reaction.
 
 **Setup 4 — TVL Rising**
-DeFiLlama shows a Base protocol TVL up >5% in 24h with positive price momentum.
-Real capital inflow = genuine adoption. Buy 5–10%.
-Check it's not a single whale deposit.
+Base protocol TVL up >5% in 24h with positive price momentum. Real capital inflow = adoption.
 
 **Setup 5 — RSI Oversold Recovery**
-RSI below 30 AND 1h momentum just turned positive. Oversold condition resolving.
-High conviction — buy up to 15%. Only use on tokens with real liquidity.
+RSI below 30 AND 1h momentum just turned positive. High conviction — use only on liquid tokens.
 
-### Exits
-No fixed rules — read the conditions. Sell into strength when momentum fades.
-If the trade thesis breaks, exit regardless of P&L. Always sell back to USDC.
+## Exits — use your judgment
+- Sell into strength when momentum fades — don't wait for the full move.
+- If the trade thesis breaks (momentum reversal, bad news), exit regardless of P&L.
+- If a position has been open 2x its intended hold time with no move, exit and redeploy.
+- ALWAYS sell back to USDC — never rotate directly between crypto assets.
+
+## Position management — fully autonomous
+- You are responsible for ALL open positions every tick.
+- If a held token has no price feed (shows $0): call get_token_info to get the current price, then decide whether to hold or exit.
+- If a position is significantly down and the thesis is broken: exit it. Do not wait for instructions.
+- If a hold window has expired: evaluate current conditions and exit if momentum is gone.
+- Stop losses are mechanical for known tokens. For tokens not in the registry, you must monitor and execute exits manually via execute_swap.
+
+## When buying a token via get_token_info
+Always pass token_out_cg_id in the execute_swap call so the position can be tracked and priced in future cycles.
 
 ## Swing trading targets
-Some coins are designated swing trade targets — buy low, sell quickly at +8%, sit in USDC, buy back on the next dip. Repeat.
-For these coins use TIGHT parameters: take_profit_pct=8, stop_loss_pct=8, max_hold_hours=18.
-Do NOT hold these waiting for a 20-25% gain — the edge is fast turnover, not big single moves.
+Fast in-out trades. Buy near weekly low, sell at TP, sit in USDC, repeat.
+Use tight parameters: take_profit_pct=8, stop_loss_pct=8, max_hold_hours=18.
 
 Current swing targets:
 """ + "\n".join(
@@ -96,21 +133,32 @@ Current swing targets:
     for sym, info in SWING_TARGETS.items()
 ) + """
 
-Buy swing targets when price is near the weekly low or RSI is oversold.
-Sell immediately at TP — do not hold through the range hoping for more.
+## Token discovery
+Trade ANY Base token. Use get_token_info(cg_id) before trading unlisted tokens.
+Use evaluate_coin(cg_id) when uncertain about safety.
+If either returns "rate limited" — skip that coin this tick, do not retry.
 
-## Trading any coin
-You can trade ANY token on Base — no whitelist. Use get_token_info to look up a coin's
-contract address and decimals before trading it. Use evaluate_coin to check safety if uncertain.
-If get_token_info or evaluate_coin returns "rate limited", do NOT retry — skip that coin this tick.
+## Primary targets
+- Base-native tokens with real projects, $5M–$2B market cap, real on-chain liquidity.
+- WETH/cbBTC: only on clear short-term technical setups.
+- Avoid: stablecoins, wrapped assets, tokens under 3 months old (size very small if you do).
 
 ## Pump and dump protection
-- Sudden >20% spike with no news = likely pump, use caution
-- Volume/market cap >5x = suspicious, evaluate first
-- Token under 3 months old = high risk, size small
-- Use your judgment — don't ask for permission, act on conviction
+- >20% spike with no news = likely pump — evaluate before touching.
+- Volume/market cap ratio >5x = suspicious.
+- MACD bearish crossover + RSI overbought during a spike = exit signal.
 
-Always reason step by step before acting."""
+## Knowledge base
+- Read your accumulated knowledge base every tick — it contains real observations from past trades.
+- After any notable observation (pattern, token behavior, market condition), call add_knowledge to save it.
+- Before entering a token you've traded before, check the knowledge base for prior notes on it.
+
+## Risk guards (enforced in code — do not override)
+- Gas cost >2% of trade size: trade blocked automatically.
+- Daily drawdown >10%: no new trades until next day.
+- Win rate <40% over last 10 trades: hold cash, reassess strategy.
+
+Always reason step by step. Act with conviction. You have full authority to manage this portfolio."""
 
 TOOLS = [
     {
@@ -152,6 +200,7 @@ TOOLS = [
                 "stop_loss_pct":      {"type": "number",  "description": "Stop loss % below entry (e.g. 20 = sell all when down 20%). Required when buying."},
                 "max_hold_hours":     {"type": "number",  "description": "Hours before starting to look for exit (default 48). Soft suggestion, not forced."},
                 "reasoning":          {"type": "string",  "description": "Why you are making this trade"},
+                "token_out_cg_id":    {"type": "string",  "description": "CoinGecko ID of token being bought (e.g. 'venice-token'). Always provide when buying a non-standard token so it can be tracked for future pricing."},
             },
             "required": ["token_in", "token_out", "amount_usd", "reasoning"],
         },
@@ -587,6 +636,7 @@ class TradingAgent:
             max_hold_hours=float(tool_input.get("max_hold_hours", 48.0)),
             entry_reasoning=reasoning if token_in_sym in {"USDC", "USDT", "DAI"} else "",
             exit_reasoning=reasoning if token_in_sym not in {"USDC", "USDT", "DAI"} else "",
+            cg_id=tool_input.get("token_out_cg_id", ""),
         )
 
         if tx_hash:
@@ -659,6 +709,9 @@ class TradingAgent:
         snapshot["trending_tokens"] = context["trending_tokens"]
         snapshot["market_data"] = context["market_data"]
         snapshot["aerodrome_pools"] = context.get("aerodrome_pools", [])
+
+        # Refresh live prices for any held token not in the main market feed
+        _refresh_held_token_prices(context["prices"])
 
         # Record prices to build up history for technical indicators
         history.record_prices(context["prices"])

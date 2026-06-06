@@ -172,6 +172,7 @@ class Executor:
         fee: int = DEFAULT_FEE,
         entry_reasoning: str = "",
         exit_reasoning: str = "",
+        cg_id: str = "",
     ) -> str | None:
         # Try Uniswap V3 first, fall back to Aerodrome
         dex_used = "uniswap_v3"
@@ -324,6 +325,7 @@ class Executor:
                         stop_loss_pct=stop_loss_pct,
                         max_hold_hours=max_hold_hours,
                         reasoning=entry_reasoning,
+                        cg_id=cg_id,
                     )
                     logger.info(f"Position opened: {amount_out_tokens:.6f} {token_out_symbol} @ ${token_out_price_usd:.4f}")
 

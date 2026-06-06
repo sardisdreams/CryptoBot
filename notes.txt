@@ -1,8 +1,9 @@
-# Catalyst Notes
-# Add any upcoming events, news, or observations here.
-# The agent reads this file every tick.
+# Analyst Notes — read by the agent every tick
 # Lines starting with # are ignored.
+# Keep entries current. Remove outdated entries.
 
-VVV (Venice Token) is a designated swing trade target. 7-day range $14.68-$19.93. Currently ~$18.87. Buy near weekly low ($14-16), sell at +8%, repeat. Emissions reduction started June 1. Use TP=8%, SL=8%, hold max 18h. CoinGecko ID: venice-token, Base contract: 0xacfE6019Ed1A7Dc6f7B508C02d1b04ec88cC21bf
+VVV (Venice Token) — swing trade target. Base contract: 0xacfE6019Ed1A7Dc6f7B508C02d1b04ec88cC21bf, CoinGecko ID: venice-token. Strategy: buy near weekly low, sell at +8%, repeat. Use TP=8%, SL=8%, max_hold_hours=18. Emissions reduction active since June 1. Current price ~$19. Weekly range shifts — check live price before entry. Only enter when RSI is oversold or price is near the bottom of the recent range.
 
-USER AUTHORIZATION 2026-06-02: Market is down significantly today. You are authorized to deploy up to $65 USDC into high-conviction dip opportunities. Look for Setup 2 (Dip Recovery) or Setup 5 (RSI Oversold Recovery) on Base tokens with real liquidity. Prioritize tokens that are oversold but have strong fundamentals. Single trade max $30.
+AERO (Aerodrome Finance) — watch for dip entries. Base's primary DEX, audited, real TVL. CoinGecko ID: aerodrome-finance, Base contract: 0x940181a94a35a4569e4529a3cdfb74e38fd98631. Good Setup 2 candidate when down with broader market but fundamentals intact.
+
+PENDLE — currently held at a significant loss (entry ~$8.24, real price ~$1.44). User has instructed to hold and sell when market recovers, even at a loss. Do NOT exit PENDLE autonomously — wait for explicit instruction or significant market recovery.

@@ -60,6 +60,7 @@ def open_position(
     stop_loss_pct: float = 25.0,
     max_hold_hours: float = 48.0,
     reasoning: str = "",
+    cg_id: str = "",
 ) -> str:
     """Record a new buy with TP/SL/time targets. Returns the position ID."""
     from datetime import timedelta
@@ -86,6 +87,7 @@ def open_position(
         "take_profit_pct":   take_profit_pct,
         "stop_loss_pct":     stop_loss_pct,
         "entry_reasoning":   reasoning,
+        "cg_id":             cg_id,
     })
     _save(positions)
     return position_id

@@ -69,21 +69,24 @@ class Portfolio:
         for symbol, lots in open_pos.items():
             if symbol in holdings or symbol == "ETH":
                 continue
-            # Look up contract address from token cache
             total_tokens = sum(lot["amount_tokens"] for lot in lots)
             if total_tokens <= 0:
                 continue
-            # Find cached token info
+            # Find cached token info — prefer cg_id stored in lot
             cached_info = None
             for lot in lots:
                 cg_id = lot.get("cg_id", "")
                 if cg_id:
                     cached_info = token_cache.get(cg_id)
-                    break
+                    if cached_info:
+                        break
             if not cached_info:
-                # Try to find by checking all cache entries
+                # Fall back to symbol lookup in cache
+                cached_info = token_cache.get_by_symbol(symbol)
+            if not cached_info:
+                # Last resort: search by name
                 for cg_id, info in token_cache.list_all().items():
-                    if info.get("name", "").upper() == symbol or cg_id.upper() == symbol:
+                    if info.get("symbol", "").upper() == symbol:
                         cached_info = info
                         break
             if not cached_info:
