@@ -10,7 +10,7 @@ from bot.logger import setup_logger
 from bot import recorder, positions, knowledge
 from bot.aerodrome import AerodromeRouter
 from bot.cost_tracker import record_gas
-from bot import capital
+from bot import capital, risk as risk_mod
 
 logger = setup_logger("executor")
 
@@ -137,6 +137,11 @@ def _record_trade_postmortem(record: dict, exit_reasoning: str):
     if gain_usd > 0:
         capital.lock_profit(gain_usd)
         logger.info(f"Profit lock: +${gain_usd * 0.10:.2f} added to floor (floor now ${capital.get_floor():.2f})")
+
+    # Record stop-out cooldown so bot won't immediately re-enter this token
+    if "stop_loss" in exit_rsn.lower() or "STOP LOSS" in exit_rsn:
+        risk_mod.record_stopout(token)
+        logger.info(f"Stop-out cooldown started for {token} ({risk_mod.COOLDOWN_MINUTES}min)")
 
 
 class Executor:
@@ -333,6 +338,19 @@ class Executor:
                 "nonce": self.wallet.get_nonce(),
                 "chainId": BASE_CHAIN_ID,
             })
+            # Simulate transaction before submission to avoid wasted gas on reverts
+            try:
+                self.w3.eth.call({
+                    "from":  self.wallet.address,
+                    "to":    tx["to"],
+                    "data":  tx["data"],
+                    "value": tx.get("value", 0),
+                    "gas":   tx["gas"],
+                })
+            except Exception as sim_err:
+                logger.warning(f"Transaction simulation failed — skipping to avoid wasted gas: {sim_err}")
+                return None
+
             tx_hash = self.wallet.sign_and_send(tx)
 
         gas_price = self.w3.eth.gas_price

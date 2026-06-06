@@ -269,7 +269,9 @@ class TradingAgent:
         currently_deployed = sum(p["cost_basis_usd"] for p in open_pos)
         tier = self.current_tier
 
-        trade_allowed, trade_block_reason = risk.can_open_trade(snapshot.get("total_usd", 0))
+        open_count = len([p for p in positions.get_position_summary(snapshot.get("prices", {})) if p])
+        trade_allowed, trade_block_reason = risk.can_open_trade(snapshot.get("total_usd", 0), open_count)
+        risk_summary = risk.get_risk_summary(snapshot.get("total_usd", 0), open_count)
         total_usd    = snapshot.get("total_usd", 0)
         usdc_usd     = snapshot.get("holdings", {}).get("USDC", {}).get("value_usd", 0)
         cap_summary  = capital.get_summary(total_usd, usdc_usd)
@@ -393,6 +395,17 @@ class TradingAgent:
                     f"    S/R: support={sr['support']:.4f} (+{sr['dist_to_support_pct']:.1f}% away) | "
                     f"resistance={sr['resistance']:.4f} (-{sr['dist_to_resistance_pct']:.1f}% away)"
                 )
+            adx = ind.get("adx")
+            if adx:
+                parts.append(
+                    f"    ADX: {adx['adx']:.1f} [{adx['regime']}] | "
+                    f"DI+={adx['di_plus']:.1f} DI-={adx['di_minus']:.1f} | "
+                    f"direction={adx['direction']}"
+                )
+            obv = ind.get("obv")
+            if obv:
+                div_note = f" *** {obv['divergence'].upper()} DIVERGENCE ***" if obv.get("divergence") else ""
+                parts.append(f"    OBV: trend={obv['obv_trend']}{div_note}")
             lines.extend(parts)
 
         # BTC trend context — most alts follow BTC direction
@@ -429,10 +442,12 @@ class TradingAgent:
                 lines.append(f"  {p['pair']}: ${p['volume_usd']:,.0f} volume")
 
         # Risk guard status
-        if not trade_allowed:
-            lines += ["", f"** RISK GUARD ACTIVE — DO NOT open new positions: {trade_block_reason} **"]
-        else:
-            lines += ["", "Risk guards: OK — new trades permitted"]
+        streak = risk_summary.get("streak", "—")
+        lines += ["",
+            f"Risk guards: {'** BLOCKED ** — ' + trade_block_reason if not trade_allowed else 'OK — new trades permitted'}",
+            f"Positions: {open_count}/{risk.MAX_OPEN_POSITIONS} open | Streak: {streak} | "
+            f"Recent W/L: {risk_summary['recent_wins']}/{risk_summary['recent_total']}",
+        ]
 
         # Manual catalyst notes
         notes = _read_notes()
@@ -528,11 +543,28 @@ class TradingAgent:
             # Save to cache so we never need to call CoinGecko for this token again
             symbol_guess = data.get("symbol", "").upper()
             token_cache.store(cg_id, contract, decimals, name, price, symbol=symbol_guess)
+
+            # Run GoPlus security check on any new token before the agent can buy it
+            from bot.evaluator import check_goplus_security
+            security = check_goplus_security(contract)
+            sec_note = ""
+            if security.get("checked"):
+                if not security.get("safe"):
+                    flags = "; ".join(security.get("flags", []))
+                    return (
+                        f"{name} ({cg_id}) FAILED SECURITY CHECK — do NOT buy.\n"
+                        f"Flags: {flags}\n"
+                        f"GoPlus honeypot={security.get('is_honeypot')} | "
+                        f"sell_tax={security.get('sell_tax', 0):.0%}"
+                    )
+                sec_note = f"\nSecurity: PASSED GoPlus check (no honeypot, sell_tax={security.get('sell_tax', 0):.0%})"
+
             return (
                 f"{name} ({cg_id})\n"
                 f"Base contract: {contract}\n"
                 f"Decimals: {decimals}\n"
-                f"Price: ${price:,.6f}\n"
+                f"Price: ${price:,.6f}"
+                f"{sec_note}\n"
                 f"Use these values in execute_swap."
             )
         except Exception as e:
@@ -617,6 +649,12 @@ class TradingAgent:
         # Recovery mode — no new buys
         if token_in_sym in {"USDC", "USDT", "DAI"} and _cap["in_recovery"]:
             return f"Recovery mode: USDC reserve ${_usdc:.2f} is below floor ${_cap['floor']:.2f} — no new trades until recovered"
+
+        # Stop-out cooldown — no re-entry into recently stopped-out tokens
+        if token_in_sym in {"USDC", "USDT", "DAI"}:
+            ok, cooldown_reason = risk.check_stopout_cooldown(token_out_sym)
+            if not ok:
+                return cooldown_reason
 
         # Enforce minimum trade size
         if amount_usd < _min_t:

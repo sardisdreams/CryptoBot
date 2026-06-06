@@ -143,6 +143,101 @@ def get_support_resistance(prices: list[float], lookback: int = 20) -> dict | No
     }
 
 
+def calculate_adx(prices: list[float], period: int = 14) -> dict | None:
+    """
+    Average Directional Index — measures trend STRENGTH (not direction).
+    ADX > 25: trending market (use trend-following signals).
+    ADX < 20: ranging market (use mean-reversion signals).
+    """
+    if len(prices) < period * 2 + 1:
+        return None
+    # Compute True Range and Directional Movement
+    tr_list, dm_plus, dm_minus = [], [], []
+    for i in range(1, len(prices)):
+        high = prices[i]
+        low  = prices[i]
+        prev = prices[i - 1]
+        # Approximate: no OHLCV so use price change as proxy
+        tr   = abs(high - prev)
+        up   = high - prev
+        down = prev - low
+        tr_list.append(tr)
+        dm_plus.append(up if up > down and up > 0 else 0)
+        dm_minus.append(down if down > up and down > 0 else 0)
+
+    def smooth(lst, p):
+        s = sum(lst[:p])
+        result = [s]
+        for v in lst[p:]:
+            s = s - s / p + v
+            result.append(s)
+        return result
+
+    atr14    = smooth(tr_list, period)
+    dmp14    = smooth(dm_plus, period)
+    dmm14    = smooth(dm_minus, period)
+
+    di_plus  = [100 * dmp14[i] / atr14[i] if atr14[i] else 0 for i in range(len(atr14))]
+    di_minus = [100 * dmm14[i] / atr14[i] if atr14[i] else 0 for i in range(len(atr14))]
+    dx       = [100 * abs(di_plus[i] - di_minus[i]) / (di_plus[i] + di_minus[i])
+                if (di_plus[i] + di_minus[i]) > 0 else 0
+                for i in range(len(di_plus))]
+
+    if len(dx) < period:
+        return None
+    adx = sum(dx[-period:]) / period
+    latest_dip = di_plus[-1]
+    latest_dim = di_minus[-1]
+    return {
+        "adx":      round(adx, 2),
+        "di_plus":  round(latest_dip, 2),
+        "di_minus": round(latest_dim, 2),
+        "trending": adx > 25,
+        "regime":   "trending" if adx > 25 else "ranging",
+        "direction": "up" if latest_dip > latest_dim else "down",
+    }
+
+
+def calculate_obv(prices: list[float]) -> dict | None:
+    """
+    On-Balance Volume — volume pressure indicator.
+    Rising OBV with flat/falling price = accumulation (bullish).
+    Falling OBV with flat/rising price = distribution (bearish).
+    We approximate volume as price change magnitude (no real volume data from CoinGecko history).
+    """
+    if len(prices) < 10:
+        return None
+    obv = [0.0]
+    for i in range(1, len(prices)):
+        change = prices[i] - prices[i - 1]
+        vol_proxy = abs(change)  # price change magnitude as volume proxy
+        if change > 0:
+            obv.append(obv[-1] + vol_proxy)
+        elif change < 0:
+            obv.append(obv[-1] - vol_proxy)
+        else:
+            obv.append(obv[-1])
+
+    # OBV trend: compare current OBV to 10-period average
+    obv_sma = sum(obv[-10:]) / 10
+    current_obv = obv[-1]
+    price_trend = "up" if prices[-1] > prices[-10] else "down"
+    obv_trend   = "up" if current_obv > obv_sma else "down"
+
+    # Divergence detection
+    divergence = None
+    if price_trend == "up" and obv_trend == "down":
+        divergence = "bearish"  # price rising but volume declining — reversal warning
+    elif price_trend == "down" and obv_trend == "up":
+        divergence = "bullish"  # price falling but volume accumulating — reversal signal
+
+    return {
+        "obv":        round(current_obv, 6),
+        "obv_trend":  obv_trend,
+        "divergence": divergence,
+    }
+
+
 def get_indicators(symbol: str) -> dict:
     """Return all technical indicators for a symbol."""
     prices = get_prices(symbol)
@@ -154,6 +249,8 @@ def get_indicators(symbol: str) -> dict:
     macd   = calculate_macd(prices)
     bb     = calculate_bollinger_bands(prices)
     sr     = get_support_resistance(prices)
+    adx    = calculate_adx(prices)
+    obv    = calculate_obv(prices)
 
     trend = None
     if sma5 and sma20:
@@ -183,6 +280,8 @@ def get_indicators(symbol: str) -> dict:
         "macd":             macd,
         "bollinger_bands":  bb,
         "support_resistance": sr,
+        "adx":              adx,
+        "obv":              obv,
         "current_price":    prices[-1] if prices else None,
     }
 

@@ -51,7 +51,7 @@ HTML = """
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>CryptoBot Dashboard</title>
-<meta http-equiv="refresh" content="60">
+<meta http-equiv="refresh" content="30">
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
@@ -119,7 +119,7 @@ HTML = """
 <div class="header">
   <h1>CryptoBot</h1>
   <span class="badge">LIVE</span>
-  <span class="ver">v2.10</span>
+  <span class="ver">v2.11</span>
   <span class="ver">Bot {{ bot_version }}</span>
   <span class="refresh">Auto-refreshes every 60s &nbsp;|&nbsp; {{ stats.wallet_address[:8] }}...{{ stats.wallet_address[-6:] }}</span>
 </div>
@@ -160,7 +160,7 @@ HTML = """
         {{ "%.5f"|format(stats.eth_balance) }}
       </div>
       <div class="sub">${{ "%.2f"|format(stats.eth_balance * stats.eth_price) }}</div>
-      <div class="sub2">{{ 'LOW — top up' if stats.eth_balance < 0.005 else 'Base network' }}</div>
+      <div class="sub2">{{ 'LOW — top up' if stats.eth_balance < 0.005 else 'Base network' }} | Gas: {{ stats.gas_price_gwei }} gwei</div>
     </div>
     <div class="card">
       <div class="label">Open Positions</div>
@@ -390,9 +390,12 @@ HTML = """
 <div class="container">
 
   <div class="section" style="margin-top:16px">
-    <h2>Closed Trades</h2>
+    <h2>Closed Trades &nbsp;
+      <input id="trade-filter" type="text" placeholder="Filter by token..." oninput="filterTrades()"
+        style="font-size:0.75rem;padding:3px 8px;border-radius:6px;border:1px solid #3d4a5c;background:#13161f;color:#e2e8f0;margin-left:8px;">
+    </h2>
     {% if closed_trades %}
-    <table>
+    <table id="trade-table">
       <tr><th>Token</th><th>Opened</th><th>Closed</th><th>Amount</th>
           <th>Cost Basis</th><th>Proceeds</th><th>P&L $</th><th>P&L %</th><th>Days</th><th>Term</th><th>Exit Tx</th></tr>
       {% for t in closed_trades %}
@@ -481,6 +484,11 @@ HTML = """
       <div class="value sm">{{ analytics.avg_hold_days }}d</div>
       <div class="sub">Closed trades</div>
     </div>
+    <div class="card">
+      <div class="label">Current Streak</div>
+      <div class="value sm {{ 'pos' if analytics.streak.startswith('W') else 'neg' }}">{{ analytics.streak }}</div>
+      <div class="sub">Win/Loss streak</div>
+    </div>
   </div>
 
   <div class="row-label">P&L by Token</div>
@@ -533,10 +541,31 @@ function showTab(name) {
   document.getElementById('tab-' + name).classList.add('active');
   event.target.classList.add('active');
 }
+function filterTrades() {
+  const q = document.getElementById('trade-filter').value.toLowerCase();
+  document.querySelectorAll('#trade-table tr').forEach((row, i) => {
+    if (i === 0) return;
+    row.style.display = row.cells[0].textContent.toLowerCase().includes(q) ? '' : 'none';
+  });
+}
 </script>
 </body>
 </html>
 """
+
+def _calc_streak(trades: list[dict]) -> str:
+    if not trades:
+        return "—"
+    streak_type = "W" if float(trades[-1].get("gain_loss_usd", 0)) >= 0 else "L"
+    count = 0
+    for t in reversed(trades):
+        is_win = float(t.get("gain_loss_usd", 0)) >= 0
+        if (is_win and streak_type == "W") or (not is_win and streak_type == "L"):
+            count += 1
+        else:
+            break
+    return f"{streak_type}{count}"
+
 
 def _build_analytics(closed_trades: list[dict]) -> dict:
     if not closed_trades:
@@ -545,7 +574,7 @@ def _build_analytics(closed_trades: list[dict]) -> dict:
             "avg_win": 0, "avg_win_pct": 0, "avg_loss": 0, "avg_loss_pct": 0,
             "profit_factor": 0, "best_trade_usd": 0, "best_trade_token": "—",
             "worst_trade_usd": 0, "worst_trade_token": "—",
-            "avg_hold_days": 0, "by_token": [],
+            "avg_hold_days": 0, "by_token": [], "streak": "—",
         }
 
     wins   = [t for t in closed_trades if float(t.get("gain_loss_usd", 0)) >= 0]
@@ -607,6 +636,7 @@ def _build_analytics(closed_trades: list[dict]) -> dict:
         "worst_trade_token": worst.get("token", "—"),
         "avg_hold_days":    round(avg_hold, 1),
         "by_token":         by_token,
+        "streak":           _calc_streak(closed_trades),
     }
 
 
@@ -779,6 +809,12 @@ def index():
     costs = get_cost_summary(eth_price)
     total_gas_usd = costs["gas_total_usd"] or sum(float(t.get("gas_cost_eth",0) or 0) for t in txns) * eth_price
 
+    # Current gas price
+    try:
+        gas_price_gwei = round(float(Web3.from_wei(w3.eth.gas_price, "gwei")), 4)
+    except Exception:
+        gas_price_gwei = 0
+
     stats = {
         "portfolio_usd":   total_usd,
         "deployed_usd":    deployed_usd,
@@ -805,6 +841,7 @@ def index():
         "capital_floor":        capital.get_floor(),
         "capital_withdrawable": capital.get_withdrawable(),
         "capital_max_deploy":   capital.get_max_deploy(total_usd),
+        "gas_price_gwei":       gas_price_gwei,
     }
 
     analytics = _build_analytics(closed)

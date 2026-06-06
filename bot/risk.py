@@ -7,12 +7,15 @@ import json
 import os
 from datetime import datetime, timezone
 
-REALIZED_GAINS_FILE = "records/realized_gains.csv"
+REALIZED_GAINS_FILE    = "records/realized_gains.csv"
 PORTFOLIO_SNAPSHOT_FILE = "data/portfolio_snapshots.json"
+COOLDOWN_FILE          = "data/stopout_cooldowns.json"
 
 DAILY_DRAWDOWN_LIMIT = 0.10   # halt if portfolio drops >10% in a single day
-WIN_RATE_MIN        = 0.40    # pause if win rate < 40% over last 10 closed trades
-WIN_RATE_LOOKBACK   = 10
+WIN_RATE_MIN         = 0.40   # pause if win rate < 40% over last 10 closed trades
+WIN_RATE_LOOKBACK    = 10
+MAX_OPEN_POSITIONS   = 5      # never hold more than 5 positions simultaneously
+COOLDOWN_MINUTES     = 30     # no re-entry into a token for 30min after stop-out
 
 
 def record_portfolio_value(total_usd: float):
@@ -22,6 +25,44 @@ def record_portfolio_value(total_usd: float):
     if today not in data:
         data[today] = total_usd
         _save_snapshots(data)
+
+
+def record_stopout(symbol: str):
+    """Record that a token was stopped out — starts the cooldown timer."""
+    data = _load_cooldowns()
+    data[symbol.upper()] = datetime.now(timezone.utc).isoformat()
+    _save_cooldowns(data)
+
+
+def check_stopout_cooldown(symbol: str) -> tuple[bool, str]:
+    """Return (ok, reason). ok=False means this token is in cooldown after a stop-out."""
+    data = _load_cooldowns()
+    ts_str = data.get(symbol.upper())
+    if not ts_str:
+        return True, ""
+    try:
+        stopped_at = datetime.fromisoformat(ts_str)
+        now = datetime.now(timezone.utc)
+        elapsed = (now - stopped_at).total_seconds() / 60
+        if elapsed < COOLDOWN_MINUTES:
+            remaining = COOLDOWN_MINUTES - elapsed
+            return False, (
+                f"{symbol} is in stop-out cooldown: {remaining:.0f}min remaining. "
+                f"Stopped out {elapsed:.0f}min ago — no re-entry until cooldown expires."
+            )
+    except Exception:
+        pass
+    return True, ""
+
+
+def check_max_positions(open_position_count: int) -> tuple[bool, str]:
+    """Return (ok, reason). ok=False if at maximum simultaneous positions."""
+    if open_position_count >= MAX_OPEN_POSITIONS:
+        return False, (
+            f"Maximum positions reached: {open_position_count}/{MAX_OPEN_POSITIONS} open. "
+            f"Wait for an existing position to close before opening a new one."
+        )
+    return True, ""
 
 
 def check_daily_drawdown(current_usd: float) -> tuple[bool, str]:
@@ -44,7 +85,7 @@ def check_win_rate() -> tuple[bool, str]:
     """Return (ok, reason). ok=False means pause new entries."""
     trades = _load_recent_trades(WIN_RATE_LOOKBACK)
     if len(trades) < WIN_RATE_LOOKBACK:
-        return True, ""  # not enough history yet
+        return True, ""
     wins = sum(1 for t in trades if float(t.get("gain_loss_pct", 0)) >= 0)
     rate = wins / len(trades)
     if rate < WIN_RATE_MIN:
@@ -55,15 +96,63 @@ def check_win_rate() -> tuple[bool, str]:
     return True, ""
 
 
-def can_open_trade(current_portfolio_usd: float) -> tuple[bool, str]:
-    """Combined guard — call this before opening any new position."""
+def can_open_trade(
+    current_portfolio_usd: float,
+    open_position_count: int = 0,
+    token_symbol: str = "",
+) -> tuple[bool, str]:
+    """Combined guard — call before opening any new position."""
     ok, reason = check_daily_drawdown(current_portfolio_usd)
     if not ok:
         return False, reason
     ok, reason = check_win_rate()
     if not ok:
         return False, reason
+    ok, reason = check_max_positions(open_position_count)
+    if not ok:
+        return False, reason
+    if token_symbol:
+        ok, reason = check_stopout_cooldown(token_symbol)
+        if not ok:
+            return False, reason
     return True, ""
+
+
+def get_risk_summary(current_portfolio_usd: float, open_position_count: int) -> dict:
+    """Return current risk state for inclusion in agent prompt."""
+    dd_ok, dd_reason = check_daily_drawdown(current_portfolio_usd)
+    wr_ok, wr_reason = check_win_rate()
+    mp_ok, mp_reason = check_max_positions(open_position_count)
+    trades = _load_recent_trades(WIN_RATE_LOOKBACK)
+    wins   = sum(1 for t in trades if float(t.get("gain_loss_pct", 0)) >= 0)
+    streak = _get_current_streak()
+    return {
+        "drawdown_ok":   dd_ok,
+        "win_rate_ok":   wr_ok,
+        "positions_ok":  mp_ok,
+        "open_count":    open_position_count,
+        "max_positions": MAX_OPEN_POSITIONS,
+        "recent_wins":   wins,
+        "recent_total":  len(trades),
+        "streak":        streak,
+        "all_clear":     dd_ok and wr_ok and mp_ok,
+    }
+
+
+def _get_current_streak() -> str:
+    """Returns current win/loss streak as a string, e.g. 'W3' or 'L2'."""
+    trades = _load_recent_trades(20)
+    if not trades:
+        return "—"
+    streak_type = "W" if float(trades[-1].get("gain_loss_pct", 0)) >= 0 else "L"
+    count = 0
+    for t in reversed(trades):
+        is_win = float(t.get("gain_loss_pct", 0)) >= 0
+        if (is_win and streak_type == "W") or (not is_win and streak_type == "L"):
+            count += 1
+        else:
+            break
+    return f"{streak_type}{count}"
 
 
 def _today() -> str:
@@ -79,11 +168,23 @@ def _load_snapshots() -> dict:
 
 def _save_snapshots(data: dict):
     os.makedirs("data", exist_ok=True)
-    # Keep only last 30 days
     if len(data) > 30:
         oldest = sorted(data.keys())[0]
         del data[oldest]
     with open(PORTFOLIO_SNAPSHOT_FILE, "w") as f:
+        json.dump(data, f, indent=2)
+
+
+def _load_cooldowns() -> dict:
+    if not os.path.exists(COOLDOWN_FILE):
+        return {}
+    with open(COOLDOWN_FILE) as f:
+        return json.load(f)
+
+
+def _save_cooldowns(data: dict):
+    os.makedirs("data", exist_ok=True)
+    with open(COOLDOWN_FILE, "w") as f:
         json.dump(data, f, indent=2)
 
 

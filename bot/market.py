@@ -1,9 +1,43 @@
+import time as _time_mod
 import requests
 import certifi
 from bot.config import TOKENS, STABLECOINS
 from bot.logger import setup_logger
 
 logger = setup_logger("market")
+
+_RATE_LIMIT_UNTIL: float = 0  # epoch time until which CoinGecko calls should be paused
+
+
+def _cg_get(url: str, params: dict, timeout: int = 10) -> requests.Response | None:
+    """
+    CoinGecko GET with exponential backoff on 429 rate limit errors.
+    Returns None if still rate-limited and the cached result should be used.
+    """
+    global _RATE_LIMIT_UNTIL
+    if _time_mod.time() < _RATE_LIMIT_UNTIL:
+        wait = _RATE_LIMIT_UNTIL - _time_mod.time()
+        logger.info(f"CoinGecko rate limit cooldown: {wait:.0f}s remaining — using cache")
+        return None
+    try:
+        resp = requests.get(url, params=params, timeout=timeout, verify=certifi.where())
+        if resp.status_code == 429:
+            # Back off 60 seconds on rate limit
+            _RATE_LIMIT_UNTIL = _time_mod.time() + 60
+            logger.warning("CoinGecko rate limited (429) — pausing calls for 60s")
+            return None
+        resp.raise_for_status()
+        return resp
+    except requests.exceptions.HTTPError as e:
+        if "429" in str(e):
+            _RATE_LIMIT_UNTIL = _time_mod.time() + 60
+            logger.warning("CoinGecko rate limited — pausing 60s")
+        else:
+            logger.error(f"CoinGecko request failed: {e}")
+        return None
+    except Exception as e:
+        logger.error(f"CoinGecko request failed: {e}")
+        return None
 
 COINGECKO_IDS = {
     "WETH":  "ethereum",
@@ -44,7 +78,7 @@ class Market:
         non_stable = {k: v for k, v in COINGECKO_IDS.items() if k not in STABLECOINS}
         ids = ",".join(non_stable.values())
         try:
-            resp = requests.get(
+            resp = _cg_get(
                 COINGECKO_MARKETS,
                 params={
                     "vs_currency": "usd",
@@ -52,10 +86,9 @@ class Market:
                     "price_change_percentage": "1h,24h",
                     "per_page": 20,
                 },
-                timeout=10,
-                verify=SSL,
             )
-            resp.raise_for_status()
+            if resp is None:
+                return _MARKET_CACHE if _MARKET_CACHE else {}
             raw = {coin["id"]: coin for coin in resp.json()}
 
             result = {}
@@ -119,8 +152,9 @@ class Market:
 
     def get_trending_tokens(self) -> list[dict]:
         try:
-            resp = requests.get(COINGECKO_TRENDING, timeout=10, verify=SSL)
-            resp.raise_for_status()
+            resp = _cg_get(COINGECKO_TRENDING, params={})
+            if resp is None:
+                return []
             coins = resp.json().get("coins", [])
             trending = []
             for item in coins[:7]:

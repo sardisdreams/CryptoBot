@@ -8,6 +8,64 @@ logger = setup_logger("evaluator")
 SSL = certifi.where()
 
 COINGECKO_COIN = "https://api.coingecko.com/api/v3/coins/{}"
+GOPLUS_TOKEN   = "https://api.gopluslabs.io/api/v1/token_security/8453"  # Base chain ID = 8453
+
+
+def check_goplus_security(contract_address: str) -> dict:
+    """
+    Check token security via GoPlus API (free, no key required).
+    Returns a dict with is_honeypot, buy_tax, sell_tax, flags.
+    Base chain ID = 8453.
+    """
+    try:
+        resp = requests.get(
+            GOPLUS_TOKEN,
+            params={"contract_addresses": contract_address.lower()},
+            timeout=10,
+            verify=SSL,
+        )
+        resp.raise_for_status()
+        data = resp.json().get("result", {})
+        token_data = data.get(contract_address.lower(), {})
+        if not token_data:
+            return {"checked": False, "reason": "No data from GoPlus"}
+
+        flags = []
+        is_honeypot   = token_data.get("is_honeypot", "0") == "1"
+        buy_tax       = float(token_data.get("buy_tax", 0) or 0)
+        sell_tax      = float(token_data.get("sell_tax", 0) or 0)
+        is_mintable   = token_data.get("is_mintable", "0") == "1"
+        has_blacklist = token_data.get("is_blacklisted", "0") == "1"
+        owner_change  = token_data.get("can_take_back_ownership", "0") == "1"
+        hidden_owner  = token_data.get("hidden_owner", "0") == "1"
+        proxy         = token_data.get("is_proxy", "0") == "1"
+
+        if is_honeypot:      flags.append("HONEYPOT — cannot sell")
+        if buy_tax > 0.10:   flags.append(f"High buy tax: {buy_tax:.0%}")
+        if sell_tax > 0.10:  flags.append(f"High sell tax: {sell_tax:.0%}")
+        if is_mintable:      flags.append("Mintable — owner can inflate supply")
+        if has_blacklist:    flags.append("Blacklist function — owner can block sells")
+        if owner_change:     flags.append("Owner can reclaim contract")
+        if hidden_owner:     flags.append("Hidden owner")
+
+        safe = not is_honeypot and sell_tax <= 0.10 and not has_blacklist
+
+        logger.info(
+            f"GoPlus check {contract_address[:10]}...: "
+            f"{'SAFE' if safe else 'RISKY'} | honeypot={is_honeypot} | "
+            f"buy_tax={buy_tax:.0%} sell_tax={sell_tax:.0%} | flags={len(flags)}"
+        )
+        return {
+            "checked":     True,
+            "safe":        safe,
+            "is_honeypot": is_honeypot,
+            "buy_tax":     buy_tax,
+            "sell_tax":    sell_tax,
+            "flags":       flags,
+        }
+    except Exception as e:
+        logger.warning(f"GoPlus check failed for {contract_address}: {e}")
+        return {"checked": False, "reason": str(e)}
 
 
 def score_coin(cg_id: str, basescan_api_key: str = None) -> dict:

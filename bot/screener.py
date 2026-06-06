@@ -2,6 +2,7 @@ import time
 import requests
 import certifi
 from bot.logger import setup_logger
+from bot.market import _cg_get
 
 logger = setup_logger("screener")
 
@@ -42,7 +43,7 @@ def get_base_ecosystem_coins(min_market_cap: int = 5_000_000, max_market_cap: in
     Targets the $5M–$500M sweet spot for meaningful upside.
     """
     try:
-        resp = requests.get(
+        resp = _cg_get(
             COINGECKO_MARKETS,
             params={
                 "vs_currency": "usd",
@@ -51,9 +52,9 @@ def get_base_ecosystem_coins(min_market_cap: int = 5_000_000, max_market_cap: in
                 "per_page": 50,
                 "price_change_percentage": "1h,24h,7d",
             },
-            timeout=15,
-            verify=SSL,
         )
+        if resp is None:
+            return []
         resp.raise_for_status()
         coins = resp.json()
 
@@ -97,7 +98,7 @@ def get_base_ecosystem_coins(min_market_cap: int = 5_000_000, max_market_cap: in
 def get_top_gainers(hours: int = 24) -> list[dict]:
     """Top gaining coins in the last 24h using free CoinGecko markets endpoint."""
     try:
-        resp = requests.get(
+        resp = _cg_get(
             COINGECKO_MARKETS,
             params={
                 "vs_currency": "usd",
@@ -106,10 +107,9 @@ def get_top_gainers(hours: int = 24) -> list[dict]:
                 "price_change_percentage": "1h,24h",
                 "category": "base-ecosystem",
             },
-            timeout=10,
-            verify=SSL,
         )
-        resp.raise_for_status()
+        if resp is None:
+            return []
         coins = sorted(
             resp.json(),
             key=lambda c: c.get("price_change_percentage_24h", 0) or 0,
