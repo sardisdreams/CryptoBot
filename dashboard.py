@@ -129,7 +129,8 @@ HTML = """
   <span class="badge">LIVE</span>
   <span class="ver">v2.12</span>
   <span class="ver">Bot {{ bot_version }}</span>
-  <span class="refresh">Auto-refreshes every 60s &nbsp;|&nbsp; {{ stats.wallet_address[:8] }}...{{ stats.wallet_address[-6:] }}</span>
+  <span class="ver">{{ loc }} lines</span>
+  <span class="refresh">Auto-refreshes every 30s &nbsp;|&nbsp; {{ stats.wallet_address[:8] }}...{{ stats.wallet_address[-6:] }}</span>
 </div>
 
 <!-- TABS -->
@@ -561,6 +562,25 @@ function filterTrades() {
 </html>
 """
 
+def _count_lines_of_code() -> str:
+    """Count total lines of Python code in the project (excluding venv, cache, tests)."""
+    total = 0
+    skip = {".venv", "venv", "__pycache__", ".git", "dist", "build"}
+    base = os.path.dirname(os.path.abspath(__file__))
+    for root, dirs, files in os.walk(base):
+        dirs[:] = [d for d in dirs if d not in skip]
+        for fname in files:
+            if fname.endswith(".py"):
+                try:
+                    with open(os.path.join(root, fname), encoding="utf-8", errors="ignore") as f:
+                        total += sum(1 for line in f if line.strip())
+                except Exception:
+                    pass
+    if total >= 1000:
+        return f"{total/1000:.1f}k"
+    return str(total)
+
+
 def _calc_streak(trades: list[dict]) -> str:
     if not trades:
         return "—"
@@ -865,6 +885,7 @@ def index():
         bot_version=BOT_VERSION,
         analytics=analytics,
         knowledge_base=kb,
+        loc=_count_lines_of_code(),
     )
 
 
