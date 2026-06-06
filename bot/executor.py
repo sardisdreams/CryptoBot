@@ -12,6 +12,7 @@ from bot.aerodrome import AerodromeRouter
 from bot.cost_tracker import record_gas
 from bot import capital, risk as risk_mod
 from bot.thegraph import check_pool_liquidity
+from bot.emailer import send_trade_notification
 
 logger = setup_logger("executor")
 
@@ -133,6 +134,9 @@ def _record_trade_postmortem(record: dict, exit_reasoning: str):
     cat = "strategy"
     knowledge.add_entry(cat, summary)
     logger.info(f"Trade post-mortem saved to knowledge base: {token} {gain_pct:+.1f}%")
+
+    # Email notification
+    send_trade_notification(record, exit_reasoning)
 
     # Lock 10% of any profit into the floor
     if gain_usd > 0:
