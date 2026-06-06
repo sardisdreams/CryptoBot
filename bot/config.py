@@ -3,7 +3,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-BOT_VERSION = "v1.03"
+BOT_VERSION = "v1.04"
 
 # Base chain
 BASE_CHAIN_ID = 8453
@@ -63,10 +63,11 @@ SWING_TARGETS = {
     },
 }
 
-# Capital deployment limits
-MAX_DEPLOY_USD = 320.0    # raised 2026-06-02: existing $254 + $65 authorized dip buying
-MIN_TRADE_USD  = 20.0     # minimum trade size (below this, gas isn't worth it)
-MAX_TRADE_USD  = 75.0     # max single trade size during testing phase
+# Capital deployment limits — these are fallback defaults only.
+# Actual limits are computed dynamically by bot/capital.py each cycle.
+MAX_DEPLOY_USD = 300.0    # fallback cap if capital.py unavailable
+MIN_TRADE_USD  = 20.0     # absolute minimum trade (gas floor)
+MAX_TRADE_USD  = 100.0    # absolute maximum single trade
 
 # Pool fee tiers: 500 = 0.05%, 3000 = 0.3%, 10000 = 1%
 DEFAULT_FEE = 3000

@@ -67,6 +67,50 @@ ERC20_ABI = [
 ]
 
 
+def _ensure_wiki_entry(symbol: str, cg_id: str, contract_address: str, price_usd: float):
+    """
+    Auto-generate a basic wiki entry for any token we buy if one doesn't exist.
+    Ensures the bot always has structured knowledge about every position it holds.
+    """
+    import os
+    wiki_path = os.path.join("wiki", f"{symbol.upper()}.md")
+    if os.path.exists(wiki_path):
+        return  # already has a wiki entry
+    from bot import token_cache as tc
+    cached = tc.get(cg_id) if cg_id else tc.get_by_symbol(symbol)
+    name = cached.get("name", symbol) if cached else symbol
+    content = f"""---
+symbol: {symbol.upper()}
+name: {name}
+chain: Base
+contract: "{contract_address}"
+cg_id: {cg_id or "unknown"}
+decimals: 18
+type: Unknown
+risk: Unknown
+status: ACTIVE — auto-generated on first buy
+---
+
+# {name} ({symbol.upper()})
+
+## What it is
+Auto-generated entry. Update with project details when available.
+
+## Trading notes
+- First bought at ${price_usd:.6f}
+- Use evaluate_coin('{cg_id}') to get a full safety assessment
+- Monitor closely — limited prior knowledge about this token
+
+## Risk factors
+- Limited information available at time of first trade
+- Verify contract legitimacy on BaseScan before adding to notes
+"""
+    os.makedirs("wiki", exist_ok=True)
+    with open(wiki_path, "w") as f:
+        f.write(content)
+    logger.info(f"Auto-generated wiki entry for {symbol}")
+
+
 def _record_trade_postmortem(record: dict, exit_reasoning: str):
     """Write a trade post-mortem to the knowledge base after any close."""
     token       = record.get("token", "?")
@@ -328,6 +372,8 @@ class Executor:
                         cg_id=cg_id,
                     )
                     logger.info(f"Position opened: {amount_out_tokens:.6f} {token_out_symbol} @ ${token_out_price_usd:.4f}")
+                    # Auto-generate wiki entry for any new token we buy
+                    _ensure_wiki_entry(token_out_symbol, cg_id, token_out_address, token_out_price_usd)
 
                 # Selling a non-stable token → close position (FIFO)
                 elif token_in_symbol not in STABLECOINS and token_out_symbol in STABLECOINS:

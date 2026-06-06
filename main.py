@@ -1,5 +1,6 @@
 import bot.ssl_fix  # must be first import — patches SSL before any HTTPS calls
 
+import json
 import os
 import time
 import certifi
@@ -16,27 +17,74 @@ from bot.portfolio import Portfolio
 from bot.executor import Executor
 from bot.agent import TradingAgent
 from bot.performance import get_tier
+from bot import token_cache
 
 load_dotenv()
 logger = setup_logger("main")
 
 os.makedirs("logs", exist_ok=True)
 os.makedirs("records", exist_ok=True)
+os.makedirs("data", exist_ok=True)
 
-DEFAULT_INTERVAL = 3600  # fallback interval in seconds
+
+def _connect_rpc(max_retries: int = 5, delay: int = 10) -> Web3:
+    """Connect to Base RPC with retries — handles temporary outages gracefully."""
+    session = requests.Session()
+    session.verify = certifi.where()
+    for attempt in range(1, max_retries + 1):
+        try:
+            w3 = Web3(Web3.HTTPProvider(BASE_RPC_URL, session=session))
+            if w3.is_connected():
+                logger.info(f"Connected to Base chain (block {w3.eth.block_number})")
+                return w3
+        except Exception as e:
+            logger.warning(f"RPC connection attempt {attempt}/{max_retries} failed: {e}")
+        if attempt < max_retries:
+            time.sleep(delay)
+    logger.error(f"Could not connect to Base RPC after {max_retries} attempts")
+    raise SystemExit(1)
+
+
+def _backfill_position_cg_ids():
+    """
+    Global startup fix: for any open position missing a cg_id,
+    find it in the token cache by symbol and patch it in.
+    Ensures all positions are priceable and trackable — runs every startup.
+    """
+    pos_file = "data/positions.json"
+    if not os.path.exists(pos_file):
+        return
+    with open(pos_file) as f:
+        all_pos = json.load(f)
+    changed = False
+    cache_all = token_cache.list_all()
+    # Build reverse lookup: symbol → cg_id
+    sym_to_cg = {
+        info.get("symbol", "").upper(): cg_id
+        for cg_id, info in cache_all.items()
+        if info.get("symbol")
+    }
+    for symbol, lots in all_pos.items():
+        cg_id = sym_to_cg.get(symbol.upper())
+        if not cg_id:
+            continue
+        for lot in lots:
+            if not lot.get("cg_id"):
+                lot["cg_id"] = cg_id
+                changed = True
+                logger.info(f"Backfilled cg_id for {symbol}: {cg_id}")
+    if changed:
+        with open(pos_file, "w") as f:
+            json.dump(all_pos, f, indent=2)
 
 
 def main():
     validate()
 
-    session = requests.Session()
-    session.verify = certifi.where()
-    w3 = Web3(Web3.HTTPProvider(BASE_RPC_URL, session=session))
-    if not w3.is_connected():
-        logger.error(f"Cannot connect to Base RPC: {BASE_RPC_URL}")
-        raise SystemExit(1)
+    w3 = _connect_rpc()
 
-    logger.info(f"Connected to Base chain (block {w3.eth.block_number})")
+    # Global startup: ensure all positions have cg_id for price tracking
+    _backfill_position_cg_ids()
 
     wallet = Wallet(w3)
     market = Market(w3)
@@ -44,23 +92,19 @@ def main():
     executor = Executor(w3, wallet)
     agent = TradingAgent(portfolio, executor)
 
-    logger.info("Trading agent started — interval adapts to performance")
+    logger.info("Trading agent started — interval adapts to performance tier")
 
     def run_and_reschedule():
         """Run one agent tick, then reschedule based on current performance tier."""
-        market = Market()
-        prices = market.get_all_prices()
+        prices = Market().get_all_prices()
         tier   = get_tier(prices)
-
-        agent.current_tier = tier  # pass to agent for dynamic thresholds
+        agent.current_tier = tier
         agent.run_once()
-
-        # Reschedule at the tier's recommended interval
         schedule.clear()
         schedule.every(tier["interval_seconds"]).seconds.do(run_and_reschedule)
         logger.info(f"Next tick in {tier['interval_seconds']//60}min (tier: {tier['label']})")
 
-    # First run
+    # First run immediately
     tier = get_tier(Market().get_all_prices())
     agent.current_tier = tier
     agent.run_once()
@@ -73,12 +117,12 @@ def main():
 
 
 if __name__ == "__main__":
-    RESTART_DELAY = 30  # seconds to wait before restarting after a crash
+    RESTART_DELAY = 30
     while True:
         try:
             main()
         except SystemExit:
-            break  # intentional exit — don't restart
+            break
         except KeyboardInterrupt:
             logger.info("Bot stopped by user.")
             break

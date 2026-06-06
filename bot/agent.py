@@ -324,22 +324,26 @@ class TradingAgent:
                 lines.append(f"  - {s}")
 
         if open_pos:
-            lines += ["", "Open positions (entry price → current P&L):"]
+            lines += ["", "Open positions (entry → now | P&L | age):"]
             for p in open_pos:
+                hold_days = p['hold_days']
+                hold_str  = f"{hold_days}d" if hold_days >= 1 else "<1d"
+                age_warn  = " [LONG HOLD — reassess thesis]" if hold_days >= 5 else ""
                 lines.append(
                     f"  {p['symbol']}: {p['amount_tokens']:.6f} tokens | "
                     f"entry ${p['entry_price']:,.4f} | now ${p['current_price']:,.4f} | "
+                    f"cost ${p['cost_basis_usd']:.2f} | value ${p['current_value']:.2f} | "
                     f"P&L ${p['gain_loss_usd']:+,.2f} ({p['gain_loss_pct']:+.2f}%) | "
-                    f"held {p['hold_days']}d"
+                    f"held {hold_str}{age_warn}"
                 )
                 if p['gain_loss_pct'] <= -25:
-                    lines.append(f"    ⚠️  STOP-LOSS TRIGGERED — down {p['gain_loss_pct']:.1f}%, consider exiting")
+                    lines.append(f"    ** STOP-LOSS ZONE — down {p['gain_loss_pct']:.1f}%, strongly consider exiting **")
                 elif p['gain_loss_pct'] >= 60:
-                    lines.append(f"    🎯 TAKE PROFIT L3 — up {p['gain_loss_pct']:.1f}%, consider selling 25%")
+                    lines.append(f"    ** TAKE PROFIT L3 — up {p['gain_loss_pct']:.1f}%, consider selling 25% **")
                 elif p['gain_loss_pct'] >= 40:
-                    lines.append(f"    🎯 TAKE PROFIT L2 — up {p['gain_loss_pct']:.1f}%, consider selling 25%")
+                    lines.append(f"    ** TAKE PROFIT L2 — up {p['gain_loss_pct']:.1f}%, consider selling 25% **")
                 elif p['gain_loss_pct'] >= 20:
-                    lines.append(f"    🎯 TAKE PROFIT L1 — up {p['gain_loss_pct']:.1f}%, consider selling 25%")
+                    lines.append(f"    ** TAKE PROFIT L1 — up {p['gain_loss_pct']:.1f}%, consider selling 25% **")
 
         fg = snapshot.get("fear_and_greed", {})
         lines += [
@@ -678,54 +682,63 @@ class TradingAgent:
 
     def _is_market_active(self, snapshot: dict) -> bool:
         """
-        Quick check: are there any interesting signals this tick?
-        If not, use Haiku (cheap). If yes, escalate to Sonnet (better reasoning).
+        Decide whether to use Sonnet (full reasoning) or Haiku (cheap scan).
+        Uses market regime to avoid wasting Sonnet in strong downtrends.
         """
-        fg = snapshot.get("fear_and_greed", {}).get("value", 50)
+        fg          = snapshot.get("fear_and_greed", {}).get("value", 50)
         market_data = snapshot.get("market_data", {})
+        threshold   = self.current_tier.get("sonnet_threshold", 5.0)
 
-        # Escalate if Fear & Greed is extreme
-        if fg <= 20 or fg >= 80:
-            logger.info("Market active: extreme Fear/Greed")
-            return True
-
-        # Use dynamic threshold from performance tier
-        threshold = self.current_tier.get("sonnet_threshold", 5.0)
-
-        # Always use Sonnet if tier says so (high profit mode)
+        # Always Sonnet if tier requires it (high profit mode)
         if self.current_tier.get("always_sonnet"):
-            logger.info(f"Market active: always_sonnet tier ({self.current_tier.get('label')})")
             return True
 
-        # Escalate if any whitelisted coin moved > threshold in 1h
+        # Compute regime — skip Sonnet in STRONG_BEAR unless positions are at risk
+        btc_ind = history.get_indicators("cbBTC")
+        regime  = history.get_market_regime(btc_ind, fg)
+        regime_label = regime["regime"]
+
+        # In STRONG_BEAR: only escalate if a position needs urgent attention
+        if regime_label == "STRONG_BEAR":
+            open_pos = positions.get_position_summary(snapshot.get("prices", {}))
+            for p in open_pos:
+                if abs(p.get("gain_loss_pct", 0)) >= 20:
+                    logger.info(f"Market active (STRONG_BEAR override): {p['symbol']} P&L={p['gain_loss_pct']:+.1f}%")
+                    return True
+            logger.info("STRONG_BEAR regime — using Haiku (no urgent positions)")
+            return False
+
+        # Escalate on extreme Fear & Greed (opportunity or danger)
+        if fg <= 20 or fg >= 80:
+            logger.info(f"Market active: extreme F&G={fg}")
+            return True
+
+        # Escalate if any tracked coin moved significantly in 1h
         for sym, d in market_data.items():
             if abs(d.get("change_1h", 0)) >= threshold:
-                logger.info(f"Market active: {sym} moved {d['change_1h']:+.1f}% in 1h (threshold {threshold}%)")
+                logger.info(f"Market active: {sym} moved {d['change_1h']:+.1f}% (threshold {threshold}%)")
                 return True
 
-        # Escalate if screener found meaningful gainers
-        gainer_threshold = threshold * 2
+        # Escalate if screener found strong gainers/losers
         for coin in snapshot.get("top_gainers", []):
-            chg = coin.get("change_24h", coin.get("change", 0))
-            if abs(chg) >= gainer_threshold:
-                logger.info(f"Market active: screener found {coin['symbol']} {chg:+.1f}%")
+            if abs(coin.get("change_24h", 0)) >= threshold * 2:
+                logger.info(f"Market active: screener {coin['symbol']} {coin['change_24h']:+.1f}%")
                 return True
 
-        # Escalate only on URGENT notes (prefix line with [URGENT])
-        urgent = [n for n in _read_notes() if n.upper().startswith("[URGENT]")]
-        if urgent:
-            logger.info(f"Market active: urgent analyst note")
+        # Escalate on urgent analyst note
+        if any(n.upper().startswith("[URGENT]") for n in _read_notes()):
+            logger.info("Market active: urgent analyst note")
             return True
 
-        # Escalate if RSI is oversold or overbought on any coin
+        # Escalate if any indicator is at extremes (RSI oversold/overbought)
         indicators = history.get_all_indicators([s for s in TOKENS if s not in {"USDC","USDT","DAI"}])
         for sym, ind in indicators.items():
             rsi = ind.get("rsi_14")
             if rsi and (rsi <= 30 or rsi >= 70):
-                logger.info(f"Market active: {sym} RSI={rsi}")
+                logger.info(f"Market active: {sym} RSI={rsi:.0f}")
                 return True
 
-        # Escalate if open positions need monitoring (P&L > ±15%)
+        # Escalate if any open position needs attention (±15% P&L)
         open_pos = positions.get_position_summary(snapshot.get("prices", {}))
         for p in open_pos:
             if abs(p.get("gain_loss_pct", 0)) >= 15:
