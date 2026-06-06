@@ -129,7 +129,7 @@ HTML = """
   <span class="badge">LIVE</span>
   <span class="ver">v2.12</span>
   <span class="ver">Bot {{ bot_version }}</span>
-  <span class="ver">{{ loc }} lines</span>
+  <span class="ver">{{ loc }} lines of code</span>
   <span class="refresh">Auto-refreshes every 30s &nbsp;|&nbsp; {{ stats.wallet_address[:8] }}...{{ stats.wallet_address[-6:] }}</span>
 </div>
 
