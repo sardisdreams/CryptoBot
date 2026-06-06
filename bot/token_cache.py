@@ -39,5 +39,14 @@ def store(cg_id: str, address: str, decimals: int, name: str, price: float = 0, 
     _save(cache)
 
 
+def get_by_symbol(symbol: str) -> dict | None:
+    """Look up a cached token by its symbol (e.g. 'VIRTUAL')."""
+    sym = symbol.upper()
+    for entry in _load().values():
+        if entry.get("symbol", "").upper() == sym:
+            return entry
+    return None
+
+
 def list_all() -> dict:
     return _load()

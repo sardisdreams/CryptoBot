@@ -678,10 +678,23 @@ class TradingAgent:
             # Stop loss and take profit execute immediately
             if ex["exit_type"] in ("stop_loss", "take_profit"):
                 token_info = TOKENS.get(sym)
+                # Fall back to token cache for tokens bought via get_token_info
+                if not token_info:
+                    cached = token_cache.get_by_symbol(sym)
+                    if cached:
+                        token_info = {
+                            "address":  cached["address"],
+                            "decimals": cached["decimals"],
+                            "symbol":   sym,
+                        }
                 usdc_info  = TOKENS["USDC"]
                 if token_info:
                     amount_wei = int(amt * (10 ** token_info["decimals"]))
                     price = context["prices"].get(sym, 0)
+                    if price == 0:
+                        cached = token_cache.get_by_symbol(sym)
+                        if cached:
+                            price = cached.get("price", 0)
                     tx = self.executor.swap(
                         token_in_address=token_info["address"],
                         token_in_symbol=sym,
