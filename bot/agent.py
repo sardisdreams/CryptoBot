@@ -28,6 +28,26 @@ def _read_notes() -> list[str]:
     return lines
 
 
+def _update_swing_target_ranges(prices: dict):
+    """
+    Update SWING_TARGETS weekly_range_low/high from stored price history.
+    Uses last 7 days of price data (up to 336 data points at 30min intervals).
+    Only updates if we have enough history — otherwise keeps existing values.
+    """
+    for sym, info in SWING_TARGETS.items():
+        stored_prices = history.get_prices(sym)
+        if len(stored_prices) < 20:
+            continue
+        # Use last 7 days worth of points (336 at 30min, cap at available)
+        window = stored_prices[-336:] if len(stored_prices) >= 336 else stored_prices
+        week_low  = round(min(window), 4)
+        week_high = round(max(window), 4)
+        if week_low != info.get("weekly_range_low") or week_high != info.get("weekly_range_high"):
+            info["weekly_range_low"]  = week_low
+            info["weekly_range_high"] = week_high
+            logger.info(f"Updated {sym} weekly range: ${week_low}–${week_high}")
+
+
 def _refresh_held_token_prices(prices: dict):
     """
     For every open position not in the main market feed, fetch a fresh price
@@ -258,6 +278,12 @@ class TradingAgent:
         dyn_max_trade  = cap_summary["max_trade"]
         in_recovery    = cap_summary["in_recovery"]
 
+        # Market regime and session context
+        fg_val  = snapshot.get("fear_and_greed", {}).get("value", 50)
+        btc_ind = history.get_indicators("cbBTC")
+        regime  = history.get_market_regime(btc_ind, fg_val)
+        session = history.get_session_context()
+
         lines = [
             f"Total portfolio value: ${total_usd:,.2f}",
             f"Performance tier: {tier.get('label','?')} | Total P&L: ${tier.get('total_pnl',0):+.2f}",
@@ -265,6 +291,13 @@ class TradingAgent:
             f"Deployment: ${currently_deployed:.2f} deployed | Max deploy: ${dyn_max_deploy:.2f} (everything above floor) | Available: ${max(0, dyn_max_deploy - currently_deployed):.2f}",
             f"Trade size: ${dyn_min_trade:.0f}–${dyn_max_trade:.0f} per trade (5–10% of portfolio)",
             f"Recovery mode: {'YES — USDC below floor, no new trades' if in_recovery else 'No — trading permitted'}",
+            f"",
+            f"== MARKET REGIME: {regime['regime']} (score {regime['score']:+d}) ==",
+            f"BTC: 1h {regime['btc_1h']:+.2f}% | 4h {regime['btc_4h']:+.2f}% | 24h {regime['btc_24h']:+.2f}% | F&G {regime['fear_greed']}/100",
+            f"Guidance: {regime['guidance']}",
+            f"",
+            f"Trading session: {session['session']} ({session['hour_utc']:02d}:00 UTC)",
+            f"{session['volume_note']}",
             f"Total realized gains: ${realized['total_realized_gain_usd']:+,.2f} "
             f"(short-term: ${realized['short_term_gain_usd']:+,.2f} | "
             f"long-term: ${realized['long_term_gain_usd']:+,.2f})",
@@ -715,6 +748,9 @@ class TradingAgent:
 
         # Record prices to build up history for technical indicators
         history.record_prices(context["prices"])
+
+        # Auto-update swing target weekly ranges from price history
+        _update_swing_target_ranges(context["prices"])
 
         # Record portfolio value for drawdown tracking (once per day)
         risk.record_portfolio_value(snapshot.get("total_usd", 0))

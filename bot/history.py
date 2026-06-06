@@ -189,3 +189,95 @@ def get_indicators(symbol: str) -> dict:
 
 def get_all_indicators(symbols: list[str]) -> dict[str, dict]:
     return {sym: get_indicators(sym) for sym in symbols}
+
+
+def get_market_regime(btc_indicators: dict, fear_greed_value: int) -> dict:
+    """
+    Classify current market regime using BTC technicals and Fear & Greed.
+    Returns regime label and trading guidance.
+    """
+    btc_1h   = btc_indicators.get("momentum_1h_pct") or 0
+    btc_4h   = btc_indicators.get("momentum_4h_pct") or 0
+    btc_24h  = btc_indicators.get("momentum_24h_pct") or 0
+    btc_trend = btc_indicators.get("trend", "unknown")
+    btc_rsi  = btc_indicators.get("rsi_14") or 50
+
+    # Score: positive = bullish, negative = bearish
+    score = 0
+    if btc_1h > 1:   score += 1
+    if btc_1h < -1:  score -= 1
+    if btc_4h > 2:   score += 2
+    if btc_4h < -2:  score -= 2
+    if btc_24h > 3:  score += 2
+    if btc_24h < -3: score -= 2
+    if btc_trend == "bullish": score += 1
+    if btc_trend == "bearish": score -= 1
+    if fear_greed_value >= 60: score += 1
+    if fear_greed_value <= 25: score -= 1
+
+    if score >= 4:
+        regime = "STRONG_BULL"
+        guidance = "Aggressive entries OK. All 5 setups valid. Size up on high-conviction signals."
+    elif score >= 2:
+        regime = "BULL"
+        guidance = "Favor longs. All setups valid. Standard sizing."
+    elif score >= -1:
+        regime = "SIDEWAYS"
+        guidance = "Selective entries only. Prefer Setup 5 (oversold) and Setup 2 (clear dip recovery). Tighter position sizes."
+    elif score >= -3:
+        regime = "BEAR"
+        guidance = "Caution. Only Setup 5 with confirmed 1h reversal. Reduce size 50%. Hold more USDC."
+    else:
+        regime = "STRONG_BEAR"
+        guidance = "Defensive. No new entries unless RSI extremely oversold with strong reversal confirmation. Preserve capital."
+
+    return {
+        "regime":    regime,
+        "score":     score,
+        "guidance":  guidance,
+        "btc_1h":    btc_1h,
+        "btc_4h":    btc_4h,
+        "btc_24h":   btc_24h,
+        "fear_greed": fear_greed_value,
+    }
+
+
+def get_session_context() -> dict:
+    """
+    Return current trading session based on UTC hour.
+    Crypto volume follows global market hours.
+    """
+    from datetime import datetime, timezone
+    hour = datetime.now(timezone.utc).hour
+
+    if 0 <= hour < 7:
+        session = "ASIA_NIGHT"
+        volume_note = "Low volume. Thin order books. Signals are noisier — require stronger confirmation before entry."
+        aggressive = False
+    elif 7 <= hour < 9:
+        session = "EUROPE_OPEN"
+        volume_note = "Volume picking up. European markets opening. Watch for morning momentum setups."
+        aggressive = True
+    elif 9 <= hour < 13:
+        session = "EUROPE_PEAK"
+        volume_note = "Good volume. Reliable signals. All setups valid."
+        aggressive = True
+    elif 13 <= hour < 17:
+        session = "US_OPEN"
+        volume_note = "Highest volume of the day. US market open drives crypto. Strong momentum setups most reliable."
+        aggressive = True
+    elif 17 <= hour < 21:
+        session = "US_AFTERNOON"
+        volume_note = "Good volume, slight afternoon drift. All setups valid."
+        aggressive = True
+    else:
+        session = "US_NIGHT"
+        volume_note = "Volume declining. Be selective. Favor high-conviction setups only."
+        aggressive = False
+
+    return {
+        "session":     session,
+        "hour_utc":    hour,
+        "volume_note": volume_note,
+        "aggressive":  aggressive,
+    }

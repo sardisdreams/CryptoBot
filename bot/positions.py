@@ -199,12 +199,47 @@ def get_open_positions() -> dict:
     return _load()
 
 
+def update_trailing_stops(current_prices: dict[str, float], trail_pct: float = 15.0):
+    """
+    Update trailing stop losses for all open positions.
+    If the current price is higher than the recorded peak, raise the stop loss
+    to trail_pct% below the new peak. Only raises stops — never lowers them.
+    """
+    all_positions = _load()
+    changed = False
+    for symbol, lots in all_positions.items():
+        current_price = current_prices.get(symbol, 0)
+        if current_price <= 0:
+            continue
+        for lot in lots:
+            entry = lot.get("entry_price_usd", 0)
+            if not entry:
+                continue
+            # Only activate trailing stop when position is up enough to matter (>8%)
+            gain_pct = (current_price - entry) / entry * 100 if entry > 0 else 0
+            if gain_pct < 8:
+                continue
+            peak = lot.get("highest_price_seen", entry)
+            if current_price > peak:
+                lot["highest_price_seen"] = round(current_price, 6)
+                new_sl = round(current_price * (1 - trail_pct / 100), 6)
+                old_sl = lot.get("stop_loss_price", 0)
+                if new_sl > old_sl:
+                    lot["stop_loss_price"] = new_sl
+                    changed = True
+    if changed:
+        _save(all_positions)
+
+
 def check_mechanical_exits(current_prices: dict[str, float]) -> list[dict]:
     """
     Check all open positions against TP/SL/time targets.
     Returns list of exits to execute — caller is responsible for executing swaps.
     Each item: {symbol, amount_tokens, reason, urgency}
     """
+    # Update trailing stops before checking exits
+    update_trailing_stops(current_prices)
+
     positions = _load()
     exits = []
     now = datetime.now(timezone.utc)

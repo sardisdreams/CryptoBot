@@ -17,7 +17,7 @@ from bot.portfolio import Portfolio
 from bot.wallet import Wallet
 from bot.positions import get_position_summary, get_realized_summary
 from bot.config import BASE_RPC_URL, PRIVATE_KEY, TOKENS, BOT_VERSION
-from bot import capital
+from bot import capital, knowledge as knowledge_module
 from bot.blacklist import block, unblock, get_all as get_blacklist
 from bot.cost_tracker import get_summary as get_cost_summary
 from flask import Flask, render_template_string, jsonify, request, redirect, request, redirect
@@ -119,7 +119,7 @@ HTML = """
 <div class="header">
   <h1>CryptoBot</h1>
   <span class="badge">LIVE</span>
-  <span class="ver">v2.08</span>
+  <span class="ver">v2.09</span>
   <span class="ver">Bot {{ bot_version }}</span>
   <span class="refresh">Auto-refreshes every 60s &nbsp;|&nbsp; {{ stats.wallet_address[:8] }}...{{ stats.wallet_address[-6:] }}</span>
 </div>
@@ -129,6 +129,8 @@ HTML = """
   <div class="tab active" onclick="showTab('portfolio')">Portfolio</div>
   <div class="tab" onclick="showTab('watchlist')">Agent Watchlist</div>
   <div class="tab" onclick="showTab('history')">Trade History</div>
+  <div class="tab" onclick="showTab('analytics')">Analytics</div>
+  <div class="tab" onclick="showTab('knowledge')">Knowledge Base</div>
 </div>
 
 <!-- TAB: PORTFOLIO -->
@@ -439,6 +441,91 @@ HTML = """
 </div>
 </div><!-- end tab-history -->
 
+<!-- TAB: ANALYTICS -->
+<div id="tab-analytics" class="tab-content">
+<div class="container">
+  <div class="row-label">Performance Summary</div>
+  <div class="grid grid-top">
+    <div class="card">
+      <div class="label">Win Rate (all time)</div>
+      <div class="value {{ 'pos' if analytics.win_rate >= 50 else 'neg' }}">{{ analytics.win_rate }}%</div>
+      <div class="sub">{{ analytics.wins }}W / {{ analytics.losses }}L</div>
+    </div>
+    <div class="card">
+      <div class="label">Avg Win</div>
+      <div class="value sm pos">+${{ "%.2f"|format(analytics.avg_win) }}</div>
+      <div class="sub">{{ "%.1f"|format(analytics.avg_win_pct) }}% avg gain</div>
+    </div>
+    <div class="card">
+      <div class="label">Avg Loss</div>
+      <div class="value sm neg">-${{ "%.2f"|format(analytics.avg_loss) }}</div>
+      <div class="sub">{{ "%.1f"|format(analytics.avg_loss_pct) }}% avg loss</div>
+    </div>
+    <div class="card">
+      <div class="label">Profit Factor</div>
+      <div class="value sm {{ 'pos' if analytics.profit_factor >= 1 else 'neg' }}">{{ "%.2f"|format(analytics.profit_factor) }}x</div>
+      <div class="sub">Gross wins / gross losses</div>
+    </div>
+    <div class="card">
+      <div class="label">Best Trade</div>
+      <div class="value sm pos">+${{ "%.2f"|format(analytics.best_trade_usd) }}</div>
+      <div class="sub">{{ analytics.best_trade_token }}</div>
+    </div>
+    <div class="card">
+      <div class="label">Worst Trade</div>
+      <div class="value sm neg">-${{ "%.2f"|format(analytics.worst_trade_usd) }}</div>
+      <div class="sub">{{ analytics.worst_trade_token }}</div>
+    </div>
+    <div class="card">
+      <div class="label">Avg Hold Time</div>
+      <div class="value sm">{{ analytics.avg_hold_days }}d</div>
+      <div class="sub">Closed trades</div>
+    </div>
+  </div>
+
+  <div class="row-label">P&L by Token</div>
+  <div class="section">
+    {% if analytics.by_token %}
+    <table>
+      <tr><th>Token</th><th>Trades</th><th>W/L</th><th>Total P&L</th><th>Avg P&L %</th><th>Best</th><th>Worst</th></tr>
+      {% for t in analytics.by_token %}
+      <tr>
+        <td><strong>{{ t.token }}</strong></td>
+        <td>{{ t.count }}</td>
+        <td class="{{ 'pos' if t.wins >= t.losses else 'neg' }}">{{ t.wins }}W / {{ t.losses }}L</td>
+        <td class="{{ 'pos' if t.total_pnl >= 0 else 'neg' }}">${{ "%+.2f"|format(t.total_pnl) }}</td>
+        <td class="{{ 'pos' if t.avg_pct >= 0 else 'neg' }}">{{ "%+.1f"|format(t.avg_pct) }}%</td>
+        <td class="pos">+${{ "%.2f"|format(t.best) }}</td>
+        <td class="neg">-${{ "%.2f"|format(t.worst) }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% else %}
+    <div class="empty">No closed trades yet</div>
+    {% endif %}
+  </div>
+</div>
+</div><!-- end tab-analytics -->
+
+<!-- TAB: KNOWLEDGE BASE -->
+<div id="tab-knowledge" class="tab-content">
+<div class="container">
+  {% for cat, entries in knowledge_base.items() %}
+  {% if entries %}
+  <div class="row-label">{{ cat }}</div>
+  <div class="section">
+    {% for e in entries|reverse %}
+    <div style="padding:8px 0;border-bottom:1px solid #2d3748;">
+      <span style="font-size:0.65rem;color:#475569;">{{ e.ts }}</span><br>
+      <span style="font-size:0.82rem;color:#e2e8f0;">{{ e.content }}</span>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+  {% endfor %}
+</div>
+</div><!-- end tab-knowledge -->
+
 <script>
 function showTab(name) {
   document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
@@ -450,6 +537,78 @@ function showTab(name) {
 </body>
 </html>
 """
+
+def _build_analytics(closed_trades: list[dict]) -> dict:
+    if not closed_trades:
+        return {
+            "win_rate": 0, "wins": 0, "losses": 0,
+            "avg_win": 0, "avg_win_pct": 0, "avg_loss": 0, "avg_loss_pct": 0,
+            "profit_factor": 0, "best_trade_usd": 0, "best_trade_token": "—",
+            "worst_trade_usd": 0, "worst_trade_token": "—",
+            "avg_hold_days": 0, "by_token": [],
+        }
+
+    wins   = [t for t in closed_trades if float(t.get("gain_loss_usd", 0)) >= 0]
+    losses = [t for t in closed_trades if float(t.get("gain_loss_usd", 0)) < 0]
+
+    avg_win      = sum(float(t["gain_loss_usd"]) for t in wins) / len(wins) if wins else 0
+    avg_win_pct  = sum(float(t["gain_loss_pct"]) for t in wins) / len(wins) if wins else 0
+    avg_loss     = abs(sum(float(t["gain_loss_usd"]) for t in losses) / len(losses)) if losses else 0
+    avg_loss_pct = abs(sum(float(t["gain_loss_pct"]) for t in losses) / len(losses)) if losses else 0
+    gross_wins   = sum(float(t["gain_loss_usd"]) for t in wins)
+    gross_losses = abs(sum(float(t["gain_loss_usd"]) for t in losses))
+    profit_factor = round(gross_wins / gross_losses, 2) if gross_losses > 0 else 0
+
+    best  = max(closed_trades, key=lambda t: float(t.get("gain_loss_usd", 0)))
+    worst = min(closed_trades, key=lambda t: float(t.get("gain_loss_usd", 0)))
+    avg_hold = sum(int(t.get("hold_days", 0)) for t in closed_trades) / len(closed_trades)
+
+    # By token
+    tokens = {}
+    for t in closed_trades:
+        tok = t.get("token", "?")
+        if tok not in tokens:
+            tokens[tok] = {"count": 0, "wins": 0, "losses": 0, "total_pnl": 0, "pcts": [], "usd_list": []}
+        pnl = float(t.get("gain_loss_usd", 0))
+        pct = float(t.get("gain_loss_pct", 0))
+        tokens[tok]["count"] += 1
+        tokens[tok]["total_pnl"] += pnl
+        tokens[tok]["pcts"].append(pct)
+        tokens[tok]["usd_list"].append(pnl)
+        if pnl >= 0: tokens[tok]["wins"] += 1
+        else:        tokens[tok]["losses"] += 1
+
+    by_token = sorted([
+        {
+            "token":     tok,
+            "count":     d["count"],
+            "wins":      d["wins"],
+            "losses":    d["losses"],
+            "total_pnl": round(d["total_pnl"], 2),
+            "avg_pct":   round(sum(d["pcts"]) / len(d["pcts"]), 1),
+            "best":      round(max(d["usd_list"]), 2),
+            "worst":     abs(round(min(d["usd_list"]), 2)),
+        }
+        for tok, d in tokens.items()
+    ], key=lambda x: x["total_pnl"], reverse=True)
+
+    return {
+        "win_rate":         round(len(wins) / len(closed_trades) * 100),
+        "wins":             len(wins),
+        "losses":           len(losses),
+        "avg_win":          round(avg_win, 2),
+        "avg_win_pct":      round(avg_win_pct, 1),
+        "avg_loss":         round(avg_loss, 2),
+        "avg_loss_pct":     round(avg_loss_pct, 1),
+        "profit_factor":    profit_factor,
+        "best_trade_usd":   round(float(best.get("gain_loss_usd", 0)), 2),
+        "best_trade_token": best.get("token", "—"),
+        "worst_trade_usd":  abs(round(float(worst.get("gain_loss_usd", 0)), 2)),
+        "worst_trade_token": worst.get("token", "—"),
+        "avg_hold_days":    round(avg_hold, 1),
+        "by_token":         by_token,
+    }
+
 
 def _load_csv(path: str) -> list[dict]:
     if not os.path.exists(path):
@@ -648,6 +807,9 @@ def index():
         "capital_max_deploy":   capital.get_max_deploy(total_usd),
     }
 
+    analytics = _build_analytics(closed)
+    kb = knowledge_module.get_all()
+
     return render_template_string(
         HTML,
         stats=stats,
@@ -657,6 +819,8 @@ def index():
         watchlist=watchlist,
         cache_updated=cache_updated,
         bot_version=BOT_VERSION,
+        analytics=analytics,
+        knowledge_base=kb,
     )
 
 

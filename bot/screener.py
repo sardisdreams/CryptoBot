@@ -59,8 +59,14 @@ def get_base_ecosystem_coins(min_market_cap: int = 5_000_000, max_market_cap: in
 
         filtered = []
         for coin in coins:
-            mc = coin.get("market_cap") or 0
+            mc     = coin.get("market_cap") or 0
+            vol    = coin.get("total_volume") or 0
             if mc < min_market_cap or mc > max_market_cap:
+                continue
+            # Minimum absolute volume ($500k/day) AND minimum turnover (0.5% of mcap)
+            if vol < 500_000:
+                continue
+            if mc > 0 and (vol / mc) < 0.005:
                 continue
             sym   = coin.get("symbol", "")
             name  = coin.get("name", "")
@@ -75,11 +81,12 @@ def get_base_ecosystem_coins(min_market_cap: int = 5_000_000, max_market_cap: in
                 "change_1h":    coin.get("price_change_percentage_1h_in_currency", 0),
                 "change_24h":   coin.get("price_change_percentage_24h", 0),
                 "change_7d":    coin.get("price_change_percentage_7d_in_currency", 0),
-                "volume_24h":   coin.get("total_volume", 0),
+                "volume_24h":   vol,
+                "volume_mcap_ratio": round(vol / mc, 4) if mc > 0 else 0,
                 "cg_id":        coin.get("id"),
             })
 
-        logger.info(f"Base ecosystem coins found: {len(filtered)} (${min_market_cap/1e6:.0f}M–${max_market_cap/1e6:.0f}M mcap)")
+        logger.info(f"Base ecosystem coins found: {len(filtered)} (${min_market_cap/1e6:.0f}M–${max_market_cap/1e6:.0f}M mcap, min vol $500k)")
         return filtered
 
     except Exception as e:
