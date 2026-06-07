@@ -549,6 +549,7 @@ function showTab(name) {
   document.querySelectorAll('.tab').forEach(el => el.classList.remove('active'));
   document.getElementById('tab-' + name).classList.add('active');
   event.target.classList.add('active');
+  localStorage.setItem('activeTab', name);
 }
 function filterTrades() {
   const q = document.getElementById('trade-filter').value.toLowerCase();
@@ -557,6 +558,17 @@ function filterTrades() {
     row.style.display = row.cells[0].textContent.toLowerCase().includes(q) ? '' : 'none';
   });
 }
+// Restore active tab after page refresh
+(function() {
+  const saved = localStorage.getItem('activeTab');
+  if (saved && document.getElementById('tab-' + saved)) {
+    document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+    document.querySelectorAll('.tab').forEach(el => el.classList.remove('active'));
+    document.getElementById('tab-' + saved).classList.add('active');
+    const tabs = document.querySelectorAll('.tab');
+    tabs.forEach(t => { if (t.getAttribute('onclick') === "showTab('" + saved + "')") t.classList.add('active'); });
+  }
+})();
 </script>
 </body>
 </html>
