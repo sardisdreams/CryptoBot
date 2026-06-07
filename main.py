@@ -6,6 +6,7 @@ import time
 import certifi
 import schedule
 import requests
+from datetime import datetime, timezone, timedelta
 from web3 import Web3
 from dotenv import load_dotenv
 
@@ -74,8 +75,86 @@ def _backfill_position_cg_ids():
                 changed = True
                 logger.info(f"Backfilled cg_id for {symbol}: {cg_id}")
     if changed:
-        with open(pos_file, "w") as f:
+        tmp = pos_file + ".tmp"
+        with open(tmp, "w") as f:
             json.dump(all_pos, f, indent=2)
+        os.replace(tmp, pos_file)
+
+
+LAST_TICK_FILE     = "data/last_tick.json"
+MIN_DOWNTIME_HOURS = 2.0    # gaps shorter than this are ignored (normal restarts)
+MAX_EXTENSION_HOURS = 168.0 # never extend by more than 7 days
+
+
+def _record_tick():
+    """Record the current time as the last successful tick."""
+    os.makedirs("data", exist_ok=True)
+    with open(LAST_TICK_FILE, "w") as f:
+        json.dump({"ts": datetime.now(timezone.utc).isoformat()}, f)
+
+
+def _adjust_positions_for_downtime():
+    """
+    If the bot was offline for an extended period, extend all open positions'
+    max_hold_until by the downtime so the agent can evaluate them fresh rather
+    than treating them as immediately overdue.
+    """
+    if not os.path.exists(LAST_TICK_FILE):
+        _record_tick()
+        return
+
+    with open(LAST_TICK_FILE) as f:
+        data = json.load(f)
+
+    now = datetime.now(timezone.utc)
+    try:
+        last_tick = datetime.fromisoformat(data["ts"])
+        # Ensure tz-aware so subtraction doesn't raise TypeError on naive timestamps
+        if last_tick.tzinfo is None:
+            last_tick = last_tick.replace(tzinfo=timezone.utc)
+        gap_hours = (now - last_tick).total_seconds() / 3600
+    except Exception:
+        _record_tick()
+        return
+    if gap_hours < MIN_DOWNTIME_HOURS:
+        return
+
+    extension = min(gap_hours, MAX_EXTENSION_HOURS)
+    logger.info(f"Detected {gap_hours:.1f}h downtime — extending all position hold windows by {extension:.1f}h")
+
+    pos_file = "data/positions.json"
+    if not os.path.exists(pos_file):
+        return
+    with open(pos_file) as f:
+        all_pos = json.load(f)
+
+    changed = False
+    for symbol, lots in all_pos.items():
+        for lot in lots:
+            until_str = lot.get("max_hold_until")
+            if not until_str:
+                continue
+            try:
+                expiry     = datetime.fromisoformat(until_str)
+                new_expiry = expiry + timedelta(hours=extension)
+                lot["max_hold_until"] = new_expiry.isoformat()
+                logger.info(
+                    f"  {symbol}: hold window extended {extension:.1f}h → "
+                    f"{new_expiry.strftime('%Y-%m-%d %H:%M')} UTC"
+                )
+                changed = True
+            except Exception:
+                pass
+
+    if changed:
+        tmp = pos_file + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(all_pos, f, indent=2)
+        os.replace(tmp, pos_file)
+
+    # Update last_tick immediately so a crash-restart loop doesn't re-apply
+    # the same extension on every restart before run_once() succeeds.
+    _record_tick()
 
 
 def main():
@@ -85,6 +164,9 @@ def main():
 
     # Global startup: ensure all positions have cg_id for price tracking
     _backfill_position_cg_ids()
+
+    # Extend hold windows for any downtime since last successful tick
+    _adjust_positions_for_downtime()
 
     wallet = Wallet(w3)
     market = Market(w3)
@@ -100,7 +182,8 @@ def main():
         tier   = get_tier(prices)
         agent.current_tier = tier
         agent.run_once()
-        # Clear any credit alert — tick succeeded so credits are working
+        # Tick succeeded — record timestamp and clear any credit alert
+        _record_tick()
         _alert_file = "data/credit_alert.json"
         if os.path.exists(_alert_file):
             os.remove(_alert_file)
@@ -112,6 +195,7 @@ def main():
     tier = get_tier(Market().get_all_prices())
     agent.current_tier = tier
     agent.run_once()
+    _record_tick()
 
     schedule.every(tier["interval_seconds"]).seconds.do(run_and_reschedule)
 
@@ -134,9 +218,7 @@ if __name__ == "__main__":
             logger.error(f"Bot crashed: {e} — restarting in {RESTART_DELAY}s...")
             # Flag credit exhaustion so dashboard can alert the user
             if "credit balance is too low" in str(e):
-                import json as _json
-                from datetime import datetime as _dt, timezone as _tz
                 os.makedirs("data", exist_ok=True)
                 with open("data/credit_alert.json", "w") as _f:
-                    _json.dump({"ts": _dt.now(_tz.utc).isoformat(), "active": True}, _f)
+                    json.dump({"ts": datetime.now(timezone.utc).isoformat(), "active": True}, _f)
             time.sleep(RESTART_DELAY)

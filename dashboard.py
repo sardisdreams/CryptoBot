@@ -706,7 +706,20 @@ ERC20_ABI = [{"inputs": [{"name": "account", "type": "address"}],
               "stateMutability": "view", "type": "function"}]
 
 import logging
+from datetime import datetime as _dt, timezone as _tz
 _log = logging.getLogger("dashboard")
+
+
+def _is_cache_fresh(cached_at_str: str, now: "_dt", max_age_hours: float) -> bool:
+    """Return True if the cached_at timestamp is within max_age_hours of now."""
+    try:
+        ts = _dt.fromisoformat(cached_at_str.replace("Z", "+00:00"))
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=_tz.utc)
+        return (now - ts).total_seconds() / 3600 <= max_age_hours
+    except Exception:
+        return False
+
 
 def _get_full_balances(w3, wallet_address: str, prices: dict) -> dict:
     """Return balances and USD values for all tokens including USDC."""
@@ -779,7 +792,11 @@ def index():
         "ETH":   "ethereum",
     }
 
-    # Build symbol → cg_id map from token cache
+    # Build symbol → cg_id map from token cache.
+    # Only use cached prices ≤4h old as a fallback — older entries reflect
+    # purchase-time prices, not current market, and will overstate portfolio value.
+    _now = _dt.now(_tz.utc)
+    MAX_CACHE_AGE_HOURS = 4
     sym_to_cg = dict(KNOWN_CG_IDS)
     cg_prices  = {}
     for cg_id, info in tc.items():
@@ -787,7 +804,15 @@ def index():
         if stored_sym and stored_sym not in sym_to_cg:
             sym_to_cg[stored_sym] = cg_id
         if info.get("price", 0) > 0:
-            cg_prices[stored_sym] = info["price"]
+            try:
+                cached_at = _dt.fromisoformat(info["cached_at"].replace("Z", "+00:00"))
+                if cached_at.tzinfo is None:
+                    cached_at = cached_at.replace(tzinfo=_tz.utc)
+                age_h = (_now - cached_at).total_seconds() / 3600
+                if age_h <= MAX_CACHE_AGE_HOURS:
+                    cg_prices[stored_sym] = info["price"]
+            except Exception:
+                pass  # skip entries with unparseable or missing cached_at
 
     # Fetch live prices for custom tokens via CoinGecko (IDs we know)
     custom_ids = [cg_id for sym, cg_id in sym_to_cg.items()
@@ -831,13 +856,24 @@ def index():
     eth_price = prices.get("WETH", 0.0)
     eth_usd   = eth_bal * eth_price
 
-    # Use current value for positions with live price, cost basis as fallback
+    # Use current value for positions with live price.
+    # Never fall back to cost basis — that's what was paid, not what it's worth.
+    # If live price failed, use recently-cached price (≤4h) as last resort only.
+    tc_by_sym = {
+        info.get("symbol", "").upper(): info
+        for info in tc.values()
+        if info.get("symbol") and info.get("price", 0) > 0 and
+        _is_cache_fresh(info.get("cached_at", ""), _now, MAX_CACHE_AGE_HOURS)
+    }
     pos_total = 0.0
     for p in open_pos:
         if p["current_value"] > 0:
             pos_total += p["current_value"]
-        elif p["cost_basis_usd"] > 0:
-            pos_total += p["cost_basis_usd"]
+        else:
+            cached = tc_by_sym.get(p["symbol"].upper())
+            if cached and cached.get("price", 0) > 0:
+                pos_total += p["amount_tokens"] * cached["price"]
+            # else: price truly unknown — exclude rather than overstate with cost basis
 
     total_usd = usdc_usd + eth_usd + pos_total
 

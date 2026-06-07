@@ -34,8 +34,10 @@ def _load() -> dict:
 
 def _save(data: dict):
     os.makedirs("data", exist_ok=True)
-    with open(POSITIONS_FILE, "w") as f:
+    tmp = POSITIONS_FILE + ".tmp"
+    with open(tmp, "w") as f:
         json.dump(data, f, indent=2)
+    os.replace(tmp, POSITIONS_FILE)  # atomic on all platforms
 
 
 def _ensure_realized_file():

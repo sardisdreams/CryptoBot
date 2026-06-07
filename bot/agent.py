@@ -52,42 +52,49 @@ def _update_swing_target_ranges(prices: dict):
 def _refresh_held_token_prices(prices: dict):
     """
     For every open position not in the main market feed, fetch a fresh price
-    from CoinGecko and update the token cache so portfolio and mechanical exits
-    have accurate prices. Skips tokens already priced this cycle.
+    from CoinGecko and inject it directly into the prices dict for this tick.
+    Also persists to token cache. Skips tokens already priced this cycle.
     """
     import requests, certifi
     open_pos = positions.get_open_positions()
-    cg_ids_to_fetch = []
+    # Build symbol→cg_id map for tokens we need to price
+    sym_to_cg = {}
     for sym, lots in open_pos.items():
         if sym in prices and prices[sym] > 0:
             continue  # already priced
         for lot in lots:
             cg_id = lot.get("cg_id", "")
-            if cg_id and cg_id not in cg_ids_to_fetch:
-                cg_ids_to_fetch.append(cg_id)
+            if cg_id:
+                sym_to_cg[sym] = cg_id
                 break
-    if not cg_ids_to_fetch:
+    if not sym_to_cg:
         return
     try:
         resp = requests.get(
             "https://api.coingecko.com/api/v3/simple/price",
-            params={"ids": ",".join(cg_ids_to_fetch), "vs_currencies": "usd"},
+            params={"ids": ",".join(sym_to_cg.values()), "vs_currencies": "usd"},
             timeout=8,
             verify=certifi.where(),
         )
         resp.raise_for_status()
         data = resp.json()
+        # Build reverse: cg_id → symbol
+        cg_to_sym = {v: k for k, v in sym_to_cg.items()}
         for cg_id, price_data in data.items():
             price = price_data.get("usd", 0)
             if price > 0:
+                sym = cg_to_sym.get(cg_id, "")
+                # Inject into live prices dict so _execute_tool sees it directly
+                if sym:
+                    prices[sym] = price
+                # Persist to token cache
                 cached = token_cache.get(cg_id)
                 if cached:
-                    cached["price"] = price
                     token_cache.store(
                         cg_id, cached["address"], cached["decimals"],
                         cached["name"], price, cached.get("symbol", "")
                     )
-                    logger.info(f"Refreshed price for {cg_id}: ${price:.6f}")
+                logger.info(f"Refreshed price for {cg_id} ({sym}): ${price:.6f}")
     except Exception as e:
         logger.warning(f"Could not refresh held token prices: {e}")
 
@@ -681,10 +688,15 @@ class TradingAgent:
         else:
             return f"Unknown token '{token_out_sym}' — use get_token_info to look up its contract address first"
 
-        # Get price for token_in
+        # Get price for token_in — check main prices dict first, then token cache for custom tokens
         price_in = snapshot["prices"].get(token_in_sym, 0)
         if price_in == 0 and token_in_sym not in {"USDC","USDT","DAI"}:
-            return f"Could not get price for {token_in_sym} — run get_token_info first"
+            cached_tok = token_cache.get_by_symbol(token_in_sym)
+            if cached_tok and cached_tok.get("price", 0) > 0:
+                price_in = cached_tok["price"]
+                logger.info(f"Using token cache price for {token_in_sym}: ${price_in:.6f}")
+            else:
+                return f"Could not get price for {token_in_sym} — run get_token_info first"
         if token_in_sym in {"USDC","USDT","DAI"}:
             price_in = 1.0
 
@@ -852,8 +864,13 @@ class TradingAgent:
         snapshot["market_data"] = context["market_data"]
         snapshot["aerodrome_pools"] = context.get("aerodrome_pools", [])
 
-        # Refresh live prices for any held token not in the main market feed
-        _refresh_held_token_prices(context["prices"])
+        # Refresh live prices for any held token not in the main market feed.
+        # Inject into snapshot["prices"] — that's what _execute_tool reads.
+        # Also inject into context["prices"] so the LLM prompt sees them.
+        _refresh_held_token_prices(snapshot["prices"])
+        for sym, price in snapshot["prices"].items():
+            if sym not in context["prices"]:
+                context["prices"][sym] = price
 
         # Record prices to build up history for technical indicators
         history.record_prices(context["prices"])
