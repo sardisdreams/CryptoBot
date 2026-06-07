@@ -74,38 +74,38 @@ HTML = """
   /* Tabs */
   .tabs { display: flex; gap: 0; border-bottom: 1px solid #3d4a5c;
           background: #1e2236; padding: 0 32px; }
-  .tab  { padding: 12px 20px; font-size: 0.82rem; font-weight: 600; color: #64748b;
+  .tab  { padding: 12px 20px; font-size: 0.82rem; font-weight: 600; color: #94a3b8;
           cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.15s; }
-  .tab:hover { color: #94a3b8; }
-  .tab.active { color: #e2e8f0; border-bottom-color: #6366f1; }
+  .tab:hover { color: #fff; }
+  .tab.active { color: #fff; border-bottom-color: #6366f1; }
   .tab-content { display: none; }
   .tab-content.active { display: block; }
   .container { max-width: 1500px; margin: 0 auto; padding: 20px 32px; }
-  .row-label { font-size: 0.68rem; font-weight: 700; color: #475569; text-transform: uppercase;
+  .row-label { font-size: 0.68rem; font-weight: 700; color: #94a3b8; text-transform: uppercase;
                letter-spacing: 0.08em; margin: 18px 0 8px; }
   .grid { display: grid; gap: 10px; margin-bottom: 4px; }
   .grid-top  { grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); }
   .grid-pnl  { grid-template-columns: repeat(auto-fill, minmax(155px, 1fr)); }
   .grid-pos  { grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); }
   .card { background: #1e2236; border: 1px solid #3d4a5c; border-radius: 10px; padding: 14px 16px; }
-  .card .label { font-size: 0.68rem; color: #64748b; text-transform: uppercase;
+  .card .label { font-size: 0.68rem; color: #94a3b8; text-transform: uppercase;
                  letter-spacing: 0.05em; margin-bottom: 5px; }
   .card .value { font-size: 1.4rem; font-weight: 700; color: #fff; line-height: 1.2; }
   .card .value.sm { font-size: 1.05rem; }
-  .card .sub  { font-size: 0.72rem; color: #64748b; margin-top: 3px; }
-  .card .sub2 { font-size: 0.68rem; color: #475569; margin-top: 2px; }
+  .card .sub  { font-size: 0.72rem; color: #cbd5e1; margin-top: 3px; }
+  .card .sub2 { font-size: 0.68rem; color: #94a3b8; margin-top: 2px; }
   .pos { color: #22c55e; }
   .neg { color: #ef4444; }
   .warn{ color: #f59e0b; }
   .section { background: #1e2236; border: 1px solid #3d4a5c; border-radius: 10px;
              padding: 16px 18px; margin-bottom: 14px; }
-  .section h2 { font-size: 0.78rem; font-weight: 700; color: #94a3b8;
+  .section h2 { font-size: 0.78rem; font-weight: 700; color: #fff;
                 text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 12px; }
   table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
   table.positions-table { font-size: 0.9rem; }
-  th { text-align: left; padding: 7px 9px; color: #475569; font-weight: 600;
+  th { text-align: left; padding: 7px 9px; color: #cbd5e1; font-weight: 600;
        font-size: 0.68rem; text-transform: uppercase; border-bottom: 1px solid #3d4a5c; }
-  td { padding: 9px 9px; border-bottom: 1px solid #2a3347; color: #e2e8f0; vertical-align: top; }
+  td { padding: 9px 9px; border-bottom: 1px solid #2a3347; color: #fff; vertical-align: top; }
   tr:last-child td { border-bottom: none; }
   tr:hover td { background: #1e2235; }
   .pill { display: inline-block; padding: 2px 7px; border-radius: 9px; font-size: 0.68rem; font-weight: 600; }
@@ -113,13 +113,13 @@ HTML = """
   .pill.failed  { background: #ef444422; color: #ef4444; }
   .pill.short   { background: #f59e0b22; color: #f59e0b; }
   .pill.long    { background: #6366f122; color: #818cf8; }
-  .hash { font-family: monospace; font-size: 0.7rem; color: #475569; }
-  .empty { color: #475569; text-align: center; padding: 20px; font-size: 0.8rem; }
-  .refresh { font-size: 0.66rem; color: #475569; margin-left: auto; }
+  .hash { font-family: monospace; font-size: 0.7rem; color: #94a3b8; }
+  .empty { color: #94a3b8; text-align: center; padding: 20px; font-size: 0.8rem; }
+  .refresh { font-size: 0.66rem; color: #cbd5e1; margin-left: auto; }
   .tag-tp  { color: #22c55e; font-size: 0.7rem; }
   .tag-sl  { color: #ef4444; font-size: 0.7rem; }
-  .tag-unk { color: #475569; font-size: 0.7rem; }
-  a.cglink { color: #94a3b8; text-decoration: none; font-weight: 600; }
+  .tag-unk { color: #94a3b8; font-size: 0.7rem; }
+  a.cglink { color: #fff; text-decoration: none; font-weight: 600; }
   a.cglink:hover { color: #e2e8f0; text-decoration: underline; }
 </style>
 </head>
@@ -874,8 +874,9 @@ def index():
     analytics = _build_analytics(closed)
     kb = knowledge_module.get_all()
 
-    from datetime import datetime, timezone
-    last_refreshed = datetime.now(timezone.utc).strftime("%b %d, %Y %H:%M:%S UTC")
+    from datetime import datetime, timezone, timedelta
+    est = timezone(timedelta(hours=-5))
+    last_refreshed = datetime.now(est).strftime("%b %d, %Y %I:%M:%S %p EST")
 
     return render_template_string(
         HTML,
