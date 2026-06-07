@@ -984,14 +984,16 @@ class TradingAgent:
         # Sort by signal count desc, then 1h change
         watchlist_coins.sort(key=lambda c: (-c["signal_count"], -c["change_1h"]))
 
-        with open("data/screener_cache.json", "w") as _f:
-            json.dump({
-                "base_ecosystem": base_eco,
-                "top_gainers":    screening.get("top_gainers_24h", []),
-                "watchlist":      watchlist_coins[:20],
-                "updated":        _dt.utcnow().isoformat(),
-                "fear_greed":     fg_val,
-            }, _f)
+        # Only write cache when we have results — preserve last good watchlist on screener failures
+        if watchlist_coins:
+            with open("data/screener_cache.json", "w") as _f:
+                json.dump({
+                    "base_ecosystem": base_eco,
+                    "top_gainers":    screening.get("top_gainers_24h", []),
+                    "watchlist":      watchlist_coins[:20],
+                    "updated":        _dt.utcnow().isoformat(),
+                    "fear_greed":     fg_val,
+                }, _f)
 
         market_context = self._build_market_prompt(snapshot)
 
