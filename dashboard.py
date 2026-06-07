@@ -721,12 +721,16 @@ def _is_cache_fresh(cached_at_str: str, now: "_dt", max_age_hours: float) -> boo
         return False
 
 
-def _get_full_balances(w3, wallet_address: str, prices: dict) -> dict:
-    """Return balances and USD values for all tokens including USDC."""
+def _get_full_balances(w3, wallet_address: str, prices: dict, custom_tokens: dict = None) -> dict:
+    """
+    Return on-chain balances and USD values for all tokens.
+    custom_tokens: {symbol: {address, decimals}} for non-registry tokens.
+    Uses actual on-chain balance queries so total matches the wallet app.
+    """
     balances = {}
     total_usd = 0.0
 
-    # Native ETH (gas only)
+    # Native ETH (gas)
     try:
         eth_bal = float(Web3.from_wei(w3.eth.get_balance(wallet_address), "ether"))
     except Exception as e:
@@ -737,25 +741,40 @@ def _get_full_balances(w3, wallet_address: str, prices: dict) -> dict:
     balances["ETH"] = {"balance": eth_bal, "value_usd": eth_usd, "is_gas": True, "price": eth_price}
     total_usd += eth_usd
 
-    # ERC-20 tokens
+    # ERC-20 registry tokens — including WETH
     for symbol, info in TOKENS.items():
-        if symbol == "WETH":
-            continue
         try:
             contract = w3.eth.contract(
                 address=Web3.to_checksum_address(info["address"]), abi=ERC20_ABI
             )
             raw = contract.functions.balanceOf(wallet_address).call()
             bal = raw / (10 ** info["decimals"])
-            # Stablecoins always $1
             price = 1.0 if symbol in {"USDC", "USDT", "DAI"} else prices.get(symbol, 0)
             val = bal * price
             balances[symbol] = {"balance": bal, "value_usd": val, "is_gas": False, "price": price}
             total_usd += val
-            _log.info(f"Balance {symbol}: {bal:.4f} (${val:.2f})")
+            _log.info(f"Balance {symbol}: {bal:.6f} (${val:.2f})")
         except Exception as e:
             _log.error(f"Balance failed for {symbol}: {e}")
             balances[symbol] = {"balance": 0.0, "value_usd": 0.0, "is_gas": False, "price": 0.0}
+
+    # Custom tokens — query actual on-chain balance so total matches wallet
+    for symbol, info in (custom_tokens or {}).items():
+        if symbol in balances:
+            continue
+        try:
+            contract = w3.eth.contract(
+                address=Web3.to_checksum_address(info["address"]), abi=ERC20_ABI
+            )
+            raw = contract.functions.balanceOf(wallet_address).call()
+            bal = raw / (10 ** info.get("decimals", 18))
+            price = prices.get(symbol, 0)
+            val = bal * price
+            balances[symbol] = {"balance": bal, "value_usd": val, "is_gas": False, "price": price}
+            total_usd += val
+            _log.info(f"Balance {symbol} (custom): {bal:.6f} (${val:.2f})")
+        except Exception as e:
+            _log.warning(f"Balance failed for custom token {symbol}: {e}")
 
     balances["_total_usd"] = total_usd
     return balances
@@ -773,7 +792,6 @@ def index():
 
     wallet_address = _get_wallet_address()
 
-    balances   = _get_full_balances(w3, wallet_address, prices)
     realized   = get_realized_summary()
     closed     = _load_csv("records/realized_gains.csv")
     txns       = list(reversed(_load_csv("records/transactions.csv")))
@@ -840,6 +858,21 @@ def index():
         if sym not in prices:
             prices[sym] = p
 
+    # Build custom_tokens map for on-chain balance queries — tokens not in registry
+    registry_syms = set(TOKENS.keys())
+    custom_tokens = {
+        info.get("symbol", "").upper(): {
+            "address":  info["address"],
+            "decimals": info.get("decimals", 18),
+        }
+        for info in tc.values()
+        if info.get("symbol") and info.get("address")
+        and info.get("symbol", "").upper() not in registry_syms
+    }
+
+    # Query on-chain balances with fully-assembled prices (registry + custom tokens)
+    balances = _get_full_balances(w3, wallet_address, prices, custom_tokens)
+
     open_pos = get_position_summary(prices)
 
     # Add CoinGecko ID and URL to each open position
@@ -849,33 +882,14 @@ def index():
         p["cg_id"]  = cg_id
         p["cg_url"] = f"https://www.coingecko.com/en/coins/{cg_id}" if cg_id else ""
 
-    # Portfolio total = USDC + ETH + all open position values
+    # Portfolio total comes directly from on-chain balance queries.
+    # This matches the wallet app exactly — no positions.json arithmetic needed.
     usdc_bal  = balances.get("USDC", {}).get("balance", 0.0)
     usdc_usd  = usdc_bal
     eth_bal   = balances.get("ETH", {}).get("balance", 0.0)
     eth_price = prices.get("WETH", 0.0)
-    eth_usd   = eth_bal * eth_price
 
-    # Use current value for positions with live price.
-    # Never fall back to cost basis — that's what was paid, not what it's worth.
-    # If live price failed, use recently-cached price (≤4h) as last resort only.
-    tc_by_sym = {
-        info.get("symbol", "").upper(): info
-        for info in tc.values()
-        if info.get("symbol") and info.get("price", 0) > 0 and
-        _is_cache_fresh(info.get("cached_at", ""), _now, MAX_CACHE_AGE_HOURS)
-    }
-    pos_total = 0.0
-    for p in open_pos:
-        if p["current_value"] > 0:
-            pos_total += p["current_value"]
-        else:
-            cached = tc_by_sym.get(p["symbol"].upper())
-            if cached and cached.get("price", 0) > 0:
-                pos_total += p["amount_tokens"] * cached["price"]
-            # else: price truly unknown — exclude rather than overstate with cost basis
-
-    total_usd = usdc_usd + eth_usd + pos_total
+    total_usd = balances["_total_usd"]
 
     unrealized   = sum(p["gain_loss_usd"] for p in open_pos)
     deployed_usd = sum(p["cost_basis_usd"] for p in open_pos)
