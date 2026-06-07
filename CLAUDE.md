@@ -2,6 +2,8 @@
 
 Autonomous crypto trading bot on Base blockchain. Uses Claude AI as decision engine. Deployed on DigitalOcean (143.198.37.28). Deploy: `ssh root@143.198.37.28 'bash /opt/cryptobot/app/deploy/update.sh'`
 
+**Before shipping any change, run the pre-flight checklist in [RULES.md](RULES.md).** That file contains the invariants — rules that must always hold. If a change would break one, fix the violation first.
+
 ---
 
 ## Critical: Two Prices Dicts — Never Confuse Them
