@@ -187,7 +187,7 @@ Malicious tokens are sometimes sent to wallets uninvited to trick bots into inte
 - Gas cost >2% of trade size: trade blocked automatically.
 - Daily drawdown >10%: no new trades until next day.
 - Win rate <40% over last 10 trades: hold cash, reassess strategy.
-- Max 5 simultaneous positions: no new entries until one closes.
+- Position cap adapts to market regime: STRONG_BEAR=4, BEAR/NEUTRAL=7, BULL/STRONG_BULL=10. Current cap shown each tick.
 - Stop-out cooldown: 30min no re-entry after being stopped out of a token.
 
 ## Confidence requirement (STRICTLY ENFORCED)
@@ -290,8 +290,8 @@ class TradingAgent:
         tier = self.current_tier
 
         open_count = len([p for p in positions.get_position_summary(snapshot.get("prices", {})) if p])
-        trade_allowed, trade_block_reason = risk.can_open_trade(snapshot.get("total_usd", 0), open_count)
-        risk_summary = risk.get_risk_summary(snapshot.get("total_usd", 0), open_count)
+        trade_allowed, trade_block_reason = risk.can_open_trade(snapshot.get("total_usd", 0), open_count, regime_label=regime["regime"])
+        risk_summary = risk.get_risk_summary(snapshot.get("total_usd", 0), open_count, regime["regime"])
         total_usd    = snapshot.get("total_usd", 0)
         usdc_usd     = snapshot.get("holdings", {}).get("USDC", {}).get("value_usd", 0)
         cap_summary  = capital.get_summary(total_usd, usdc_usd)

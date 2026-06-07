@@ -14,8 +14,21 @@ COOLDOWN_FILE          = "data/stopout_cooldowns.json"
 DAILY_DRAWDOWN_LIMIT = 0.10   # halt if portfolio drops >10% in a single day
 WIN_RATE_MIN         = 0.40   # pause if win rate < 40% over last 10 closed trades
 WIN_RATE_LOOKBACK    = 10
-MAX_OPEN_POSITIONS   = 5      # never hold more than 5 positions simultaneously
 COOLDOWN_MINUTES     = 30     # no re-entry into a token for 30min after stop-out
+
+# Regime-aware position caps — tighter in downtrends, more room in uptrends
+_REGIME_CAPS = {
+    "STRONG_BEAR": 4,
+    "BEAR":        7,
+    "NEUTRAL":     7,
+    "BULL":        10,
+    "STRONG_BULL": 10,
+}
+MAX_OPEN_POSITIONS = 7  # fallback default (neutral market)
+
+
+def get_position_cap(regime_label: str = "NEUTRAL") -> int:
+    return _REGIME_CAPS.get(regime_label, MAX_OPEN_POSITIONS)
 
 
 def record_portfolio_value(total_usd: float):
@@ -55,12 +68,13 @@ def check_stopout_cooldown(symbol: str) -> tuple[bool, str]:
     return True, ""
 
 
-def check_max_positions(open_position_count: int) -> tuple[bool, str]:
-    """Return (ok, reason). ok=False if at maximum simultaneous positions."""
-    if open_position_count >= MAX_OPEN_POSITIONS:
+def check_max_positions(open_position_count: int, regime_label: str = "NEUTRAL") -> tuple[bool, str]:
+    """Return (ok, reason). ok=False if at maximum simultaneous positions for current regime."""
+    cap = get_position_cap(regime_label)
+    if open_position_count >= cap:
         return False, (
-            f"Maximum positions reached: {open_position_count}/{MAX_OPEN_POSITIONS} open. "
-            f"Wait for an existing position to close before opening a new one."
+            f"Maximum positions reached: {open_position_count}/{cap} open "
+            f"({regime_label} regime). Wait for a position to close before opening another."
         )
     return True, ""
 
@@ -100,6 +114,7 @@ def can_open_trade(
     current_portfolio_usd: float,
     open_position_count: int = 0,
     token_symbol: str = "",
+    regime_label: str = "NEUTRAL",
 ) -> tuple[bool, str]:
     """Combined guard — call before opening any new position."""
     ok, reason = check_daily_drawdown(current_portfolio_usd)
@@ -108,7 +123,7 @@ def can_open_trade(
     ok, reason = check_win_rate()
     if not ok:
         return False, reason
-    ok, reason = check_max_positions(open_position_count)
+    ok, reason = check_max_positions(open_position_count, regime_label)
     if not ok:
         return False, reason
     if token_symbol:
@@ -118,11 +133,12 @@ def can_open_trade(
     return True, ""
 
 
-def get_risk_summary(current_portfolio_usd: float, open_position_count: int) -> dict:
+def get_risk_summary(current_portfolio_usd: float, open_position_count: int, regime_label: str = "NEUTRAL") -> dict:
     """Return current risk state for inclusion in agent prompt."""
     dd_ok, dd_reason = check_daily_drawdown(current_portfolio_usd)
     wr_ok, wr_reason = check_win_rate()
-    mp_ok, mp_reason = check_max_positions(open_position_count)
+    mp_ok, mp_reason = check_max_positions(open_position_count, regime_label)
+    cap    = get_position_cap(regime_label)
     trades = _load_recent_trades(WIN_RATE_LOOKBACK)
     wins   = sum(1 for t in trades if float(t.get("gain_loss_pct", 0)) >= 0)
     streak = _get_current_streak()
@@ -131,7 +147,7 @@ def get_risk_summary(current_portfolio_usd: float, open_position_count: int) -> 
         "win_rate_ok":   wr_ok,
         "positions_ok":  mp_ok,
         "open_count":    open_position_count,
-        "max_positions": MAX_OPEN_POSITIONS,
+        "max_positions": cap,
         "recent_wins":   wins,
         "recent_total":  len(trades),
         "streak":        streak,
