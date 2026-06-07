@@ -289,6 +289,12 @@ class TradingAgent:
         currently_deployed = sum(p["cost_basis_usd"] for p in open_pos)
         tier = self.current_tier
 
+        # Market regime and session context — must be calculated first
+        fg_val  = snapshot.get("fear_and_greed", {}).get("value", 50)
+        btc_ind = history.get_indicators("cbBTC")
+        regime  = history.get_market_regime(btc_ind, fg_val)
+        session = history.get_session_context()
+
         open_count = len([p for p in positions.get_position_summary(snapshot.get("prices", {})) if p])
         trade_allowed, trade_block_reason = risk.can_open_trade(snapshot.get("total_usd", 0), open_count, regime_label=regime["regime"])
         risk_summary = risk.get_risk_summary(snapshot.get("total_usd", 0), open_count, regime["regime"])
@@ -299,12 +305,6 @@ class TradingAgent:
         dyn_min_trade  = cap_summary["min_trade"]
         dyn_max_trade  = cap_summary["max_trade"]
         in_recovery    = cap_summary["in_recovery"]
-
-        # Market regime and session context
-        fg_val  = snapshot.get("fear_and_greed", {}).get("value", 50)
-        btc_ind = history.get_indicators("cbBTC")
-        regime  = history.get_market_regime(btc_ind, fg_val)
-        session = history.get_session_context()
 
         lines = [
             f"Total portfolio value: ${total_usd:,.2f}",
