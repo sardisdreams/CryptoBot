@@ -253,6 +253,19 @@ class Executor:
             logger.warning("Swap rejected: amount_in_wei must be positive")
             return None
 
+        # Dusting attack protection: refuse to sell any token the bot never bought.
+        # Malicious tokens are sometimes airdropped to wallets — interacting with them
+        # (calling approve or transferring) can drain the wallet via malicious contracts.
+        is_sell = token_in_symbol not in STABLECOINS and token_out_symbol in STABLECOINS
+        if is_sell and token_in_symbol not in {"WETH", "cbBTC", "cbETH"}:
+            open_pos = positions.get_open_positions()
+            if token_in_symbol not in open_pos:
+                logger.warning(
+                    f"Dusting attack protection: refusing to sell {token_in_symbol} — "
+                    f"no tracked position found. Token may have been airdropped."
+                )
+                return None
+
         # Try Uniswap V3 first, fall back to Aerodrome
         dex_used = "uniswap_v3"
         amount_out = self.get_quote(token_in_address, token_out_address, amount_in_wei, fee)
