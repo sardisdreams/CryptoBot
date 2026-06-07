@@ -789,6 +789,8 @@ def index():
 
     market = Market()
     prices = market.get_all_prices()
+    # Drop zeros — a 0 from a rate-limited call should not block fallbacks below
+    prices = {k: v for k, v in prices.items() if v > 0}
 
     wallet_address = _get_wallet_address()
 
@@ -832,10 +834,11 @@ def index():
             except Exception:
                 pass  # skip entries with unparseable or missing cached_at
 
-    # Fetch live prices for custom tokens via CoinGecko (IDs we know)
+    # Fetch live prices from CoinGecko for any symbol still missing or zero
+    # (includes WETH/cbBTC/cbETH when market.get_all_prices() was rate-limited)
+    STABLECOIN_SYMS = {"USDC", "USDT", "DAI", "ETH"}
     custom_ids = [cg_id for sym, cg_id in sym_to_cg.items()
-                  if sym not in prices and cg_id not in ("ethereum","usd-coin","tether","dai",
-                                                          "coinbase-wrapped-btc","coinbase-wrapped-staked-eth")]
+                  if prices.get(sym, 0) == 0 and sym not in STABLECOIN_SYMS]
     if custom_ids:
         try:
             import time as _t
@@ -853,9 +856,9 @@ def index():
         except Exception:
             pass
 
-    # Fill remaining from cache
+    # Fill remaining from cache (also covers price=0 from a rate-limited call)
     for sym, p in cg_prices.items():
-        if sym not in prices:
+        if prices.get(sym, 0) == 0:
             prices[sym] = p
 
     # Build custom_tokens map for on-chain balance queries — tokens not in registry
