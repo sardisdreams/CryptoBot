@@ -16,19 +16,32 @@ WIN_RATE_MIN         = 0.40   # pause if win rate < 40% over last 10 closed trad
 WIN_RATE_LOOKBACK    = 10
 COOLDOWN_MINUTES     = 30     # no re-entry into a token for 30min after stop-out
 
-# Regime-aware position caps — tighter in downtrends, more room in uptrends
-_REGIME_CAPS = {
-    "STRONG_BEAR": 4,
-    "BEAR":        7,
-    "NEUTRAL":     7,
-    "BULL":        10,
-    "STRONG_BULL": 10,
+# Regime multipliers — scale down in downtrends, full capacity in uptrends
+_REGIME_MULTIPLIERS = {
+    "STRONG_BEAR": 0.70,
+    "BEAR":        0.80,
+    "NEUTRAL":     0.90,
+    "BULL":        1.00,
+    "STRONG_BULL": 1.00,
 }
-MAX_OPEN_POSITIONS = 7  # fallback default (neutral market)
+MAX_OPEN_POSITIONS = 7  # fallback default (neutral market, ~$1000 portfolio)
 
 
-def get_position_cap(regime_label: str = "NEUTRAL") -> int:
-    return _REGIME_CAPS.get(regime_label, MAX_OPEN_POSITIONS)
+def get_position_cap(portfolio_usd: float, regime_label: str = "NEUTRAL") -> int:
+    """
+    Position cap that scales with portfolio size and adjusts for market regime.
+    Portfolio tiers set a base, regime multiplier tightens in downtrends.
+    """
+    if portfolio_usd < 500:
+        base = 7
+    elif portfolio_usd < 2_000:
+        base = 10
+    elif portfolio_usd < 10_000:
+        base = 15
+    else:
+        base = 20
+    mult = _REGIME_MULTIPLIERS.get(regime_label, 0.90)
+    return max(4, int(base * mult))
 
 
 def record_portfolio_value(total_usd: float):
@@ -68,13 +81,14 @@ def check_stopout_cooldown(symbol: str) -> tuple[bool, str]:
     return True, ""
 
 
-def check_max_positions(open_position_count: int, regime_label: str = "NEUTRAL") -> tuple[bool, str]:
-    """Return (ok, reason). ok=False if at maximum simultaneous positions for current regime."""
-    cap = get_position_cap(regime_label)
+def check_max_positions(open_position_count: int, portfolio_usd: float = 500.0, regime_label: str = "NEUTRAL") -> tuple[bool, str]:
+    """Return (ok, reason). ok=False if at maximum simultaneous positions for current portfolio/regime."""
+    cap = get_position_cap(portfolio_usd, regime_label)
     if open_position_count >= cap:
         return False, (
             f"Maximum positions reached: {open_position_count}/{cap} open "
-            f"({regime_label} regime). Wait for a position to close before opening another."
+            f"({regime_label} regime, ${portfolio_usd:.0f} portfolio). "
+            f"Wait for a position to close before opening another."
         )
     return True, ""
 
@@ -123,7 +137,7 @@ def can_open_trade(
     ok, reason = check_win_rate()
     if not ok:
         return False, reason
-    ok, reason = check_max_positions(open_position_count, regime_label)
+    ok, reason = check_max_positions(open_position_count, current_portfolio_usd, regime_label)
     if not ok:
         return False, reason
     if token_symbol:
@@ -137,8 +151,8 @@ def get_risk_summary(current_portfolio_usd: float, open_position_count: int, reg
     """Return current risk state for inclusion in agent prompt."""
     dd_ok, dd_reason = check_daily_drawdown(current_portfolio_usd)
     wr_ok, wr_reason = check_win_rate()
-    mp_ok, mp_reason = check_max_positions(open_position_count, regime_label)
-    cap    = get_position_cap(regime_label)
+    mp_ok, mp_reason = check_max_positions(open_position_count, current_portfolio_usd, regime_label)
+    cap    = get_position_cap(current_portfolio_usd, regime_label)
     trades = _load_recent_trades(WIN_RATE_LOOKBACK)
     wins   = sum(1 for t in trades if float(t.get("gain_loss_pct", 0)) >= 0)
     streak = _get_current_streak()
