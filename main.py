@@ -100,6 +100,10 @@ def main():
         tier   = get_tier(prices)
         agent.current_tier = tier
         agent.run_once()
+        # Clear any credit alert — tick succeeded so credits are working
+        _alert_file = "data/credit_alert.json"
+        if os.path.exists(_alert_file):
+            os.remove(_alert_file)
         schedule.clear()
         schedule.every(tier["interval_seconds"]).seconds.do(run_and_reschedule)
         logger.info(f"Next tick in {tier['interval_seconds']//60}min (tier: {tier['label']})")
@@ -128,4 +132,11 @@ if __name__ == "__main__":
             break
         except Exception as e:
             logger.error(f"Bot crashed: {e} — restarting in {RESTART_DELAY}s...")
+            # Flag credit exhaustion so dashboard can alert the user
+            if "credit balance is too low" in str(e):
+                import json as _json
+                from datetime import datetime as _dt, timezone as _tz
+                os.makedirs("data", exist_ok=True)
+                with open("data/credit_alert.json", "w") as _f:
+                    _json.dump({"ts": _dt.now(_tz.utc).isoformat(), "active": True}, _f)
             time.sleep(RESTART_DELAY)

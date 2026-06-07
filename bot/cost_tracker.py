@@ -56,15 +56,19 @@ def get_summary(eth_price_usd: float = 0.0) -> dict:
 
     total_costs = round(anthropic_total + gas_total_usd, 2)
 
-    # 7-day Anthropic spend
+    # 7-day and current-month Anthropic spend
     daily = data["anthropic"].get("daily", {})
-    days = sorted(daily.keys())[-7:]
-    anthropic_7d = round(sum(daily[d] for d in days), 4)
+    days_7d = sorted(daily.keys())[-7:]
+    anthropic_7d = round(sum(daily[d] for d in days_7d), 4)
+
+    this_month = datetime.now(timezone.utc).strftime("%Y-%m")
+    anthropic_month = round(sum(v for k, v in daily.items() if k.startswith(this_month)), 4)
 
     return {
         "anthropic_total":  round(anthropic_total, 4),
         "anthropic_today":  round(anthropic_today, 4),
         "anthropic_7d":     anthropic_7d,
+        "anthropic_month":  anthropic_month,
         "gas_total_usd":    round(gas_total_usd, 2),
         "total_costs":      total_costs,
         "alchemy":          0.0,   # free tier

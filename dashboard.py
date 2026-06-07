@@ -133,6 +133,17 @@ HTML = """
   <span class="refresh">Last refreshed: {{ last_refreshed }} &nbsp;|&nbsp; {{ stats.wallet_address[:8] }}...{{ stats.wallet_address[-6:] }}</span>
 </div>
 
+<!-- CREDIT ALERT BANNER -->
+{% if credit_alert %}
+<div style="background:#7f1d1d;border-bottom:2px solid #ef4444;padding:10px 32px;display:flex;align-items:center;gap:10px;">
+  <span style="color:#ef4444;font-size:1.1rem;font-weight:700;">&#9888;</span>
+  <span style="color:#fca5a5;font-size:0.85rem;font-weight:600;">
+    Anthropic API credits exhausted — bot is paused. Top up at <strong>console.anthropic.com</strong> to resume trading.
+    Last failed: {{ credit_alert }}
+  </span>
+</div>
+{% endif %}
+
 <!-- TABS -->
 <div class="tabs">
   <div class="tab active" onclick="showTab('portfolio')">Portfolio</div>
@@ -238,11 +249,14 @@ HTML = """
       <div class="value sm neg">-${{ "%.2f"|format(stats.total_gas_usd) }}</div>
       <div class="sub">{{ stats.total_txns }} transactions</div>
     </div>
-    <div class="card">
-      <div class="label">Claude API</div>
-      <div class="value sm neg">-${{ "%.2f"|format(stats.anthropic_total) }}</div>
-      <div class="sub">Today: -${{ "%.4f"|format(stats.anthropic_today) }}</div>
-      <div class="sub2">7d: -${{ "%.2f"|format(stats.anthropic_7d) }} &nbsp;|&nbsp; Alchemy/CoinGecko: free</div>
+    <div class="card" style="{% if stats.credit_pct >= 90 %}border-color:#ef4444;background:#3d1618;{% elif stats.credit_pct >= 70 %}border-color:#f59e0b;{% endif %}">
+      <div class="label">Claude API Credits</div>
+      <div class="value sm neg">-${{ "%.2f"|format(stats.anthropic_month) }} <span style="font-size:0.75rem;color:#94a3b8;">/ ${{ "%.0f"|format(stats.credit_budget) }}</span></div>
+      <div style="margin:5px 0 3px;background:#2a3347;border-radius:4px;height:6px;width:100%;">
+        <div style="background:{% if stats.credit_pct >= 90 %}#ef4444{% elif stats.credit_pct >= 70 %}#f59e0b{% else %}#22c55e{% endif %};height:6px;border-radius:4px;width:{{ [stats.credit_pct, 100]|min }}%;"></div>
+      </div>
+      <div class="sub {% if stats.credit_pct >= 90 %}neg{% elif stats.credit_pct >= 70 %}warn{% else %}pos{% endif %}">{{ "%.0f"|format(stats.credit_pct) }}% of monthly budget used</div>
+      <div class="sub2">Today: -${{ "%.4f"|format(stats.anthropic_today) }} &nbsp;|&nbsp; 7d: -${{ "%.2f"|format(stats.anthropic_7d) }}</div>
     </div>
     <div class="card" style="border-color:#6366f144">
       <div class="label">Net Profit (after costs)</div>
@@ -847,6 +861,23 @@ def index():
     # Cost tracking
     costs = get_cost_summary(eth_price)
     total_gas_usd = costs["gas_total_usd"] or sum(float(t.get("gas_cost_eth",0) or 0) for t in txns) * eth_price
+    credit_budget = float(os.getenv("ANTHROPIC_BUDGET_USD", "25"))
+    credit_pct = round(costs["anthropic_month"] / credit_budget * 100, 1) if credit_budget > 0 else 0
+
+    # Credit alert flag — set by bot when credits are exhausted
+    credit_alert = None
+    if os.path.exists("data/credit_alert.json"):
+        try:
+            with open("data/credit_alert.json") as _f:
+                _ca = json.load(_f)
+            if _ca.get("active"):
+                from datetime import datetime as _dt2, timezone as _tz2, timedelta as _td
+                _ts = _dt2.fromisoformat(_ca["ts"])
+                if (_dt2.now(_tz2.utc) - _ts).total_seconds() < 3600:
+                    est = timezone(timedelta(hours=-5))
+                    credit_alert = _ts.astimezone(est).strftime("%b %d %I:%M %p EST")
+        except Exception:
+            pass
 
     # Current gas price
     try:
@@ -875,6 +906,9 @@ def index():
         "anthropic_today":      costs["anthropic_today"],
         "anthropic_total":      costs["anthropic_total"],
         "anthropic_7d":         costs["anthropic_7d"],
+        "anthropic_month":      costs["anthropic_month"],
+        "credit_budget":        credit_budget,
+        "credit_pct":           credit_pct,
         "total_costs":          costs["total_costs"],
         "net_profit":           round((realized["total_realized_gain_usd"] + unrealized) - costs["total_costs"], 2),
         "capital_floor":        capital.get_floor(),
@@ -898,6 +932,7 @@ def index():
         transactions=txns,
         watchlist=watchlist,
         cache_updated=cache_updated,
+        credit_alert=credit_alert,
         bot_version=BOT_VERSION,
         analytics=analytics,
         knowledge_base=kb,
