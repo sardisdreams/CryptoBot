@@ -130,7 +130,7 @@ HTML = """
   <span class="ver">v2.12</span>
   <span class="ver">Bot {{ bot_version }}</span>
   <span class="ver">{{ loc }} lines of code</span>
-  <span class="refresh">Auto-refreshes every 30s &nbsp;|&nbsp; {{ stats.wallet_address[:8] }}...{{ stats.wallet_address[-6:] }}</span>
+  <span class="refresh">Last refreshed: {{ last_refreshed }} &nbsp;|&nbsp; {{ stats.wallet_address[:8] }}...{{ stats.wallet_address[-6:] }}</span>
 </div>
 
 <!-- TABS -->
@@ -874,6 +874,9 @@ def index():
     analytics = _build_analytics(closed)
     kb = knowledge_module.get_all()
 
+    from datetime import datetime, timezone
+    last_refreshed = datetime.now(timezone.utc).strftime("%b %d, %Y %H:%M:%S UTC")
+
     return render_template_string(
         HTML,
         stats=stats,
@@ -886,6 +889,7 @@ def index():
         analytics=analytics,
         knowledge_base=kb,
         loc=_count_lines_of_code(),
+        last_refreshed=last_refreshed,
     )
 
 
