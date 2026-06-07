@@ -7,7 +7,7 @@ from bot.portfolio import Portfolio
 from bot.executor import Executor
 from bot.logger import setup_logger
 from bot import history, wiki, positions, blacklist, token_cache, knowledge, risk, capital
-from bot.cost_tracker import record_anthropic
+from bot.cost_tracker import record_anthropic, get_summary as get_cost_summary
 from bot.self_improve import run_self_analysis
 from bot.screener import get_screening_report
 from bot.evaluator import score_coin, format_report
@@ -801,19 +801,19 @@ class TradingAgent:
         if self.current_tier.get("always_sonnet"):
             return True
 
-        # Compute regime — skip Sonnet in STRONG_BEAR unless positions are at risk
+        # Compute regime — skip Sonnet in bear markets unless positions are in crisis
         btc_ind = history.get_indicators("cbBTC")
         regime  = history.get_market_regime(btc_ind, fg)
         regime_label = regime["regime"]
 
-        # In STRONG_BEAR: only escalate if a position needs urgent attention
-        if regime_label == "STRONG_BEAR":
+        # In STRONG_BEAR or BEAR: only escalate if a position is in genuine crisis (>30%)
+        if regime_label in ("STRONG_BEAR", "BEAR"):
             open_pos = positions.get_position_summary(snapshot.get("prices", {}))
             for p in open_pos:
-                if abs(p.get("gain_loss_pct", 0)) >= 20:
-                    logger.info(f"Market active (STRONG_BEAR override): {p['symbol']} P&L={p['gain_loss_pct']:+.1f}%")
+                if abs(p.get("gain_loss_pct", 0)) >= 30:
+                    logger.info(f"Market active ({regime_label} override): {p['symbol']} P&L={p['gain_loss_pct']:+.1f}%")
                     return True
-            logger.info("STRONG_BEAR regime — using Haiku (no urgent positions)")
+            logger.info(f"{regime_label} regime — using Haiku (no positions in crisis)")
             return False
 
         # Escalate on extreme Fear & Greed (opportunity or danger)
@@ -846,10 +846,10 @@ class TradingAgent:
                 logger.info(f"Market active: {sym} RSI={rsi:.0f}")
                 return True
 
-        # Escalate if any open position needs attention (±15% P&L)
+        # Escalate if any open position needs attention (±25% P&L in neutral/bull)
         open_pos = positions.get_position_summary(snapshot.get("prices", {}))
         for p in open_pos:
-            if abs(p.get("gain_loss_pct", 0)) >= 15:
+            if abs(p.get("gain_loss_pct", 0)) >= 25:
                 logger.info(f"Market active: {p['symbol']} P&L={p['gain_loss_pct']:+.1f}%")
                 return True
 
@@ -1016,8 +1016,17 @@ class TradingAgent:
 
         # Two-tier model: Haiku for quiet markets, Sonnet when signals are active
         active = self._is_market_active(snapshot)
+
+        # Budget guard — force Haiku when >80% of monthly budget is consumed
+        budget = float(os.getenv("ANTHROPIC_BUDGET_USD", "25"))
+        spent  = get_cost_summary().get("anthropic_month", 0)
+        if budget > 0 and spent >= budget * 0.8:
+            if active:
+                logger.warning(f"Budget guard: {spent:.2f}/{budget:.2f} spent — downgrading Sonnet → Haiku")
+            active = False
+
         model = "claude-sonnet-4-6" if active else "claude-haiku-4-5-20251001"
-        logger.info(f"Using model: {model} (market active: {active})")
+        logger.info(f"Using model: {model} (market active: {active}, monthly: ${spent:.2f}/${budget:.2f})")
 
         messages = [{"role": "user", "content": market_context}]
 
