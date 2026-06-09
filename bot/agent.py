@@ -10,6 +10,7 @@ from bot import history, wiki, positions, blacklist, token_cache, knowledge, ris
 from bot.cost_tracker import record_anthropic, get_summary as get_cost_summary
 from bot.self_improve import run_self_analysis
 from bot.screener import get_screening_report
+from bot.signals import score_candidates as _score_candidates
 from bot.evaluator import score_coin, format_report
 from bot.liquidity import filter_liquid_coins
 
@@ -548,6 +549,32 @@ class TradingAgent:
                 lines += ["", "Base protocols with significant TVL change:"]
                 for p in top_tvl:
                     lines.append(f"  {p['name']} ({p['symbol']}): TVL ${p['tvl']/1e6:.0f}M | {p.get('change_1d', 0):+.1f}%")
+
+        # Signal-scored candidates using real daily OHLCV (EMA50, RSI, ATR, dip, momentum)
+        # OHLCV is cached 4h per token — first run is slow, subsequent calls are instant
+        if base_coins:
+            top_by_vol = sorted(base_coins, key=lambda c: c.get("volume_24h", 0), reverse=True)[:8]
+            scored     = _score_candidates(top_by_vol, regime["regime"])
+            passing    = [s for s in scored if s["signal"]["entry_ok"]]
+
+            if passing:
+                lines += ["", "== SIGNAL-FILTERED OPPORTUNITIES (score ≥ 60/100) ==",
+                          "These passed EMA trend + RSI + dip + momentum + macro + volatility filters.",
+                          "Use signal stop_pct as stop_loss_pct and target_pct as take_profit_pct in execute_swap."]
+                for s in passing:
+                    sig = s["signal"]
+                    stop_s   = f"{sig['stop_pct']}%" if sig['stop_pct'] else "n/a"
+                    target_s = f"{sig['target_pct']}%" if sig['target_pct'] else "n/a"
+                    lines.append(
+                        f"  {s['symbol']}: score={sig['score']}/100 | RSI={sig['rsi']} | "
+                        f"ATR={sig['atr_pct']}% | stop={stop_s} | target={target_s} (2:1 R/R) | "
+                        f"cgid:{s['cg_id']}"
+                    )
+                    for cond in sig.get("conditions", []):
+                        lines.append(f"    {cond}")
+            else:
+                lines += ["", "Signal filter: no candidates scored ≥ 60 this tick — do not force entries.",
+                          f"(Scored {len(scored)} candidates, best score: {scored[0]['signal']['score'] if scored else 0}/100)"]
 
         # Wiki only for tokens currently held (not entire registry)
         held_symbols = [sym for sym, h in snapshot.get("holdings", {}).items() if h.get("balance", 0) > 0.000001 and sym not in {"USDC","USDT","DAI","ETH"}]

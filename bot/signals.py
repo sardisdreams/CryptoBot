@@ -1,0 +1,216 @@
+"""
+Trade signal engine — scores a candidate 0-100 using real daily OHLCV candles.
+Score >= 60 means the setup is tradeable.
+Stop and target are ATR-based (replaces fixed %) giving minimum 2:1 risk/reward.
+
+Six conditions (total 100 pts):
+  1. Trend    (25) — price above EMA50 daily
+  2. RSI      (20) — 14-period RSI in 35-65 zone
+  3. Dip      (15) — 5-25% pullback from 20-day high
+  4. Momentum (15) — price > SMA10 > SMA20
+  5. Macro    (15) — BTC regime
+  6. Vol      (10) — ATR < 12% of price
+"""
+from bot.ohlcv import get_candles
+from bot.logger import setup_logger
+
+logger = setup_logger("signals")
+
+MIN_ENTRY_SCORE = 60
+ATR_STOP_MULT   = 1.5   # stop  = entry - 1.5 × ATR
+ATR_TARGET_MULT = 3.0   # target = entry + 3.0 × ATR  (2:1 R/R minimum)
+
+
+def score_entry(cg_id: str, symbol: str, current_price: float, btc_regime: str) -> dict:
+    """
+    Score a potential entry. Returns full signal dict including ATR-based
+    stop_price, target_price, and human-readable conditions list.
+    """
+    candles = get_candles(cg_id)
+    if len(candles) < 30:
+        return _no_data(symbol, cg_id)
+
+    closes = [c["close"] for c in candles]
+    highs  = [c["high"]  for c in candles]
+
+    score      = 0
+    conditions = []
+
+    # ── 1. TREND: price above EMA50 (25 pts) ──────────────────────────────────
+    ema50 = _ema(closes, 50)
+    if ema50:
+        if current_price > ema50:
+            score += 25
+            conditions.append(f"✓ Above EMA50 ${ema50:.4f} — uptrend intact")
+        else:
+            gap = (ema50 - current_price) / ema50 * 100
+            conditions.append(f"✗ {gap:.1f}% below EMA50 ${ema50:.4f} — downtrend, skip")
+
+    # ── 2. RSI: 35-65 zone (20 pts) ───────────────────────────────────────────
+    rsi = _rsi(closes)
+    if rsi is not None:
+        if 35 <= rsi <= 55:
+            score += 20
+            conditions.append(f"✓ RSI {rsi:.0f} — ideal entry zone")
+        elif 55 < rsi <= 65:
+            score += 10
+            conditions.append(f"~ RSI {rsi:.0f} — momentum OK, near upper bound")
+        elif rsi > 65:
+            conditions.append(f"✗ RSI {rsi:.0f} — overbought, wait for pullback")
+        else:
+            conditions.append(f"✗ RSI {rsi:.0f} — weak / selling pressure")
+
+    # ── 3. DIP ENTRY: 5-25% below 20-day high (15 pts) ───────────────────────
+    high_20d = max(highs[-20:]) if len(highs) >= 20 else max(highs)
+    pullback  = (high_20d - current_price) / high_20d * 100 if high_20d > 0 else 0
+    if 5 <= pullback <= 25:
+        score += 15
+        conditions.append(f"✓ {pullback:.1f}% below 20d high — healthy dip")
+    elif pullback < 5:
+        conditions.append(f"✗ Only {pullback:.1f}% off high — chasing, poor R/R")
+    else:
+        conditions.append(f"✗ {pullback:.1f}% below 20d high — too damaged")
+
+    # ── 4. MOMENTUM: price > SMA10 > SMA20 (15 pts) ──────────────────────────
+    sma10 = _sma(closes, 10)
+    sma20 = _sma(closes, 20)
+    if sma10 and sma20:
+        if current_price > sma10 and sma10 > sma20:
+            score += 15
+            conditions.append(f"✓ Price > SMA10 > SMA20 — momentum aligned")
+        elif current_price > sma10:
+            score += 7
+            conditions.append(f"~ Price > SMA10, SMA10 below SMA20 — early recovery")
+        else:
+            conditions.append(f"✗ Price < SMA10 — short-term momentum negative")
+
+    # ── 5. MACRO: BTC regime (15 pts) ─────────────────────────────────────────
+    if btc_regime in ("BULL", "STRONG_BULL"):
+        score += 15
+        conditions.append(f"✓ BTC {btc_regime} — macro tailwind")
+    elif btc_regime == "NEUTRAL":
+        score += 10
+        conditions.append(f"~ BTC NEUTRAL — no macro headwind")
+    elif btc_regime == "BEAR":
+        score += 5
+        conditions.append(f"~ BTC BEAR — headwind, require stronger setup")
+    else:
+        conditions.append(f"✗ BTC STRONG_BEAR — avoid new entries")
+
+    # ── 6. VOLATILITY: ATR < 12% (10 pts) ────────────────────────────────────
+    atr     = _atr(candles[-15:])
+    atr_pct = (atr / current_price * 100) if atr and current_price > 0 else None
+    if atr_pct is not None:
+        if atr_pct < 8:
+            score += 10
+            conditions.append(f"✓ ATR {atr_pct:.1f}% — stable, tight stops")
+        elif atr_pct < 12:
+            score += 5
+            conditions.append(f"~ ATR {atr_pct:.1f}% — moderate volatility")
+        else:
+            conditions.append(f"✗ ATR {atr_pct:.1f}% — high volatility, hard to size")
+
+    # ── Stop / Target (ATR-based) ──────────────────────────────────────────────
+    stop_price = target_price = stop_pct = target_pct = None
+    if atr and current_price > 0:
+        stop_price   = round(current_price - ATR_STOP_MULT * atr, 8)
+        target_price = round(current_price + ATR_TARGET_MULT * atr, 8)
+        stop_pct     = round((current_price - stop_price) / current_price * 100, 1)
+        target_pct   = round((target_price - current_price) / current_price * 100, 1)
+
+    entry_ok = score >= MIN_ENTRY_SCORE
+    logger.info(f"Signal {symbol}: {score}/100 entry_ok={entry_ok}")
+
+    return {
+        "symbol":       symbol,
+        "cg_id":        cg_id,
+        "score":        score,
+        "entry_ok":     entry_ok,
+        "stop_price":   stop_price,
+        "target_price": target_price,
+        "stop_pct":     stop_pct,
+        "target_pct":   target_pct,
+        "rsi":          round(rsi, 1) if rsi is not None else None,
+        "ema50":        round(ema50, 6) if ema50 else None,
+        "atr_pct":      round(atr_pct, 2) if atr_pct else None,
+        "conditions":   conditions,
+    }
+
+
+def score_candidates(candidates: list[dict], btc_regime: str) -> list[dict]:
+    """
+    Score a list of screener candidates. Returns list sorted by score descending.
+    Adds a 'signal' key to each candidate dict.
+    Only top 8 candidates are scored to limit CoinGecko API calls;
+    remaining get score=0 (OHLCV cached after first fetch so subsequent ticks are fast).
+    """
+    to_score   = [c for c in candidates if c.get("cg_id") and c.get("price", 0) > 0][:8]
+    skip       = [c for c in candidates if c not in to_score]
+
+    scored = []
+    for c in to_score:
+        sig = score_entry(c["cg_id"], c.get("symbol", "?"), c["price"], btc_regime)
+        scored.append({**c, "signal": sig})
+
+    for c in skip:
+        scored.append({**c, "signal": {"score": 0, "entry_ok": False, "conditions": ["not scored"]}})
+
+    return sorted(scored, key=lambda x: x["signal"]["score"], reverse=True)
+
+
+# ── Internal indicator helpers ─────────────────────────────────────────────────
+
+def _ema(prices: list[float], period: int) -> float | None:
+    if len(prices) < period:
+        return None
+    k   = 2 / (period + 1)
+    val = sum(prices[:period]) / period
+    for p in prices[period:]:
+        val = p * k + val * (1 - k)
+    return round(val, 8)
+
+
+def _sma(prices: list[float], period: int) -> float | None:
+    if len(prices) < period:
+        return None
+    return sum(prices[-period:]) / period
+
+
+def _rsi(prices: list[float], period: int = 14) -> float | None:
+    if len(prices) < period + 1:
+        return None
+    gains, losses = [], []
+    for i in range(1, len(prices)):
+        d = prices[i] - prices[i - 1]
+        gains.append(max(d, 0))
+        losses.append(max(-d, 0))
+    ag = sum(gains[-period:]) / period
+    al = sum(losses[-period:]) / period
+    if al == 0:
+        return 100.0
+    return round(100 - (100 / (1 + ag / al)), 2)
+
+
+def _atr(candles: list[dict], period: int = 14) -> float | None:
+    if len(candles) < period + 1:
+        return None
+    trs = []
+    for i in range(1, len(candles)):
+        high = candles[i]["high"]
+        low  = candles[i]["low"]
+        prev = candles[i - 1]["close"]
+        trs.append(max(high - low, abs(high - prev), abs(low - prev)))
+    if len(trs) < period:
+        return None
+    return sum(trs[-period:]) / period
+
+
+def _no_data(symbol: str, cg_id: str) -> dict:
+    return {
+        "symbol": symbol, "cg_id": cg_id,
+        "score": 0, "entry_ok": False,
+        "stop_price": None, "target_price": None,
+        "stop_pct": None, "target_pct": None,
+        "rsi": None, "ema50": None, "atr_pct": None,
+        "conditions": ["insufficient daily OHLCV data (< 30 candles)"],
+    }
