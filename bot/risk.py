@@ -16,32 +16,33 @@ WIN_RATE_MIN         = 0.40   # pause if win rate < 40% over last 10 closed trad
 WIN_RATE_LOOKBACK    = 10
 COOLDOWN_MINUTES     = 30     # no re-entry into a token for 30min after stop-out
 
-# Regime multipliers — scale down in downtrends, full capacity in uptrends
+# Regime multipliers — available USDC is the real constraint; regime only trims slightly
 _REGIME_MULTIPLIERS = {
-    "STRONG_BEAR": 0.70,
-    "BEAR":        0.80,
-    "NEUTRAL":     0.90,
+    "STRONG_BEAR": 0.80,
+    "BEAR":        0.90,
+    "NEUTRAL":     1.00,
     "BULL":        1.00,
     "STRONG_BULL": 1.00,
 }
-MAX_OPEN_POSITIONS = 7  # fallback default (neutral market, ~$1000 portfolio)
+MAX_OPEN_POSITIONS = 12  # fallback default (neutral market, ~$1000 portfolio)
 
 
 def get_position_cap(portfolio_usd: float, regime_label: str = "NEUTRAL") -> int:
     """
-    Position cap that scales with portfolio size and adjusts for market regime.
-    Portfolio tiers set a base, regime multiplier tightens in downtrends.
+    Position cap scales with portfolio size. Regime applies only a light trim —
+    available USDC is the real limiting factor, not slot count.
+    Underwater positions should not block new opportunities.
     """
     if portfolio_usd < 500:
-        base = 7
+        base = 12
     elif portfolio_usd < 2_000:
-        base = 10
-    elif portfolio_usd < 10_000:
         base = 15
-    else:
+    elif portfolio_usd < 10_000:
         base = 20
-    mult = _REGIME_MULTIPLIERS.get(regime_label, 0.90)
-    return max(4, int(base * mult))
+    else:
+        base = 30
+    mult = _REGIME_MULTIPLIERS.get(regime_label, 1.00)
+    return max(6, int(base * mult))
 
 
 def record_portfolio_value(total_usd: float):

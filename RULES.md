@@ -47,6 +47,7 @@ fix the rule violation first or explicitly update this file with the new contrac
 | C2 | BEAR or STRONG_BEAR regime → Haiku unless a position is ≥ 30% P&L (either direction) | Old 15% threshold + underwater positions = Sonnet every hour |
 | C3 | Neutral/bull regime → Sonnet only if position ≥ 25% P&L, extreme F&G, or significant 1h move | Lower thresholds burn budget on normal volatility |
 | C4 | Performance tier controls tick interval — CONSERVE (60min) when P&L is negative | Fast ticks × Sonnet = budget exhausted mid-month |
+| C5 | Position cap must not block new trades when USDC is available — available USDC is the real constraint, not slot count | Low cap with underwater positions permanently locks out new opportunities |
 
 ---
 
