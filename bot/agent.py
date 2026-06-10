@@ -1,7 +1,9 @@
 import os
+import json
 import httpx
 import certifi
 import anthropic
+from datetime import datetime, timezone
 from bot.config import ANTHROPIC_API_KEY, TOKENS, MAX_DEPLOY_USD, MIN_TRADE_USD, MAX_TRADE_USD, SWING_TARGETS
 from bot.portfolio import Portfolio
 from bot.executor import Executor
@@ -15,6 +17,31 @@ from bot.evaluator import score_coin, format_report
 from bot.liquidity import filter_liquid_coins
 
 logger = setup_logger("agent")
+
+TRADE_BLOCKS_FILE = "data/trade_blocks.json"
+_KEEP_BLOCKS = 100
+
+
+def _log_trade_block(token_in: str, token_out: str, amount_usd: float, reason: str):
+    """Persist agent-level trade rejections so the dashboard can surface them."""
+    os.makedirs("data", exist_ok=True)
+    try:
+        blocks = json.load(open(TRADE_BLOCKS_FILE)) if os.path.exists(TRADE_BLOCKS_FILE) else []
+    except Exception:
+        blocks = []
+    blocks.append({
+        "ts":         datetime.now(timezone.utc).isoformat(),
+        "token_in":   token_in,
+        "token_out":  token_out,
+        "amount_usd": round(amount_usd, 2),
+        "reason":     reason,
+    })
+    blocks = blocks[-_KEEP_BLOCKS:]
+    tmp = TRADE_BLOCKS_FILE + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(blocks, f, indent=2)
+    os.replace(tmp, TRADE_BLOCKS_FILE)
+
 
 NOTES_FILE = "notes.txt"
 
@@ -732,6 +759,7 @@ class TradingAgent:
 
         # Check blacklist
         if blacklist.is_blocked(token_out_sym):
+            _log_trade_block(token_in_sym, token_out_sym, amount_usd, f"{token_out_sym} is on the block list")
             return f"{token_out_sym} is on your block list — trade cancelled"
 
         # Dynamic capital limits
@@ -744,18 +772,23 @@ class TradingAgent:
 
         # Recovery mode — no new buys
         if token_in_sym in {"USDC", "USDT", "DAI"} and _cap["in_recovery"]:
-            return f"Recovery mode: USDC reserve ${_usdc:.2f} is below floor ${_cap['floor']:.2f} — no new trades until recovered"
+            msg = f"Recovery mode: USDC reserve ${_usdc:.2f} is below floor ${_cap['floor']:.2f} — no new trades until recovered"
+            _log_trade_block(token_in_sym, token_out_sym, amount_usd, msg)
+            return msg
 
         # Stop-out cooldown — no re-entry into recently stopped-out tokens
         if token_in_sym in {"USDC", "USDT", "DAI"}:
             ok, cooldown_reason = risk.check_stopout_cooldown(token_out_sym)
             if not ok:
+                _log_trade_block(token_in_sym, token_out_sym, amount_usd, cooldown_reason)
                 return cooldown_reason
 
         # Enforce minimum trade size — buys only; never block exits of existing positions
         is_buy = token_in_sym in {"USDC", "USDT", "DAI"}
         if is_buy and amount_usd < _min_t:
-            return f"Trade too small: ${amount_usd:.2f} is below minimum ${_min_t:.2f}"
+            msg = f"Trade too small: ${amount_usd:.2f} is below minimum ${_min_t:.2f}"
+            _log_trade_block(token_in_sym, token_out_sym, amount_usd, msg)
+            return msg
 
         # Enforce maximum single trade size
         if amount_usd > _max_t:
@@ -769,7 +802,9 @@ class TradingAgent:
             if currently_deployed + amount_usd > _max_dep:
                 remaining = _max_dep - currently_deployed
                 if remaining < _min_t:
-                    return f"Deployment cap reached: ${currently_deployed:.2f} deployed of ${_max_dep:.2f} max (floor: ${_cap['floor']:.2f})"
+                    msg = f"Deployment cap reached: ${currently_deployed:.2f} deployed of ${_max_dep:.2f} max (floor: ${_cap['floor']:.2f})"
+                    _log_trade_block(token_in_sym, token_out_sym, amount_usd, msg)
+                    return msg
                 amount_usd = min(amount_usd, remaining)
                 logger.info(f"Trade reduced to ${amount_usd:.2f} to stay within dynamic cap ${_max_dep:.2f}")
 
@@ -781,7 +816,9 @@ class TradingAgent:
         holding = snapshot["holdings"].get(token_in_sym, {})
         available_usd = holding.get("value_usd", 0)
         if amount_usd > available_usd * 0.98:
-            return f"Insufficient balance: have ${available_usd:.2f} of {token_in_sym}, need ${amount_usd:.2f}"
+            msg = f"Insufficient balance: have ${available_usd:.2f} of {token_in_sym}, need ${amount_usd:.2f}"
+            _log_trade_block(token_in_sym, token_out_sym, amount_usd, msg)
+            return msg
 
         # Get token_out price — check prices dict, market_data, and token cache
         token_out_price = snapshot["prices"].get(token_out_sym, 0)

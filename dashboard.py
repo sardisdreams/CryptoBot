@@ -355,6 +355,39 @@ HTML = """
     {% endif %}
   </div>
 
+  <!-- Recent Issues -->
+  <div class="row-label" style="margin-top:24px">Recent Issues</div>
+  <div class="section" style="margin-top:8px">
+    <h2>Trade Failures &amp; Blocks</h2>
+    {% if recent_issues %}
+    <table>
+      <tr><th>Time</th><th>Direction</th><th>Amount</th><th>Type</th><th>Reason</th><th>Tx</th></tr>
+      {% for issue in recent_issues %}
+      <tr>
+        <td style="color:#64748b;font-size:0.73rem;white-space:nowrap">{{ issue.ts[:16].replace("T"," ") }}</td>
+        <td>{{ issue.token_in }} → {{ issue.token_out }}</td>
+        <td>${{ "%.2f"|format(issue.amount_usd|float) }}</td>
+        <td>
+          {% if issue.type == "blocked" %}
+          <span class="pill failed" style="font-size:0.68rem">blocked</span>
+          {% else %}
+          <span class="pill failed" style="font-size:0.68rem">swap failed</span>
+          {% endif %}
+        </td>
+        <td style="color:#94a3b8;font-size:0.78rem;max-width:340px">{{ issue.reason }}</td>
+        <td>
+          {% if issue.tx_hash %}
+          <a href="https://basescan.org/tx/{{ issue.tx_hash }}" target="_blank" class="hash">{{ issue.tx_hash[:10] }}...</a>
+          {% else %}—{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% else %}
+    <div class="empty">No recent issues</div>
+    {% endif %}
+  </div>
+
 </div>
 </div><!-- end tab-portfolio -->
 
@@ -710,6 +743,55 @@ from datetime import datetime as _dt, timezone as _tz
 _log = logging.getLogger("dashboard")
 
 
+def _get_recent_issues(n: int = 30) -> list[dict]:
+    """
+    Return the most recent trade failures and agent-level blocks, combined and
+    sorted newest-first. Sources:
+      - data/trade_blocks.json  — agent rejected the trade before it reached the executor
+      - records/transactions.csv — on-chain swap attempts that returned status != success
+    """
+    issues = []
+
+    # Agent-level blocks
+    blocks_file = "data/trade_blocks.json"
+    if os.path.exists(blocks_file):
+        try:
+            for b in json.load(open(blocks_file)):
+                issues.append({
+                    "ts":         b.get("ts", ""),
+                    "type":       "blocked",
+                    "token_in":   b.get("token_in", "?"),
+                    "token_out":  b.get("token_out", "?"),
+                    "amount_usd": b.get("amount_usd", 0),
+                    "reason":     b.get("reason", ""),
+                    "tx_hash":    "",
+                })
+        except Exception:
+            pass
+
+    # On-chain failures
+    txns_file = "records/transactions.csv"
+    if os.path.exists(txns_file):
+        try:
+            with open(txns_file, newline="") as f:
+                for row in csv.DictReader(f):
+                    if row.get("status", "").lower() not in ("success", ""):
+                        issues.append({
+                            "ts":         row.get("date_utc", ""),
+                            "type":       "swap_failed",
+                            "token_in":   row.get("token_in", "?"),
+                            "token_out":  row.get("token_out", "?"),
+                            "amount_usd": row.get("amount_in", 0),
+                            "reason":     f"On-chain swap failed (status: {row.get('status','?')})",
+                            "tx_hash":    row.get("tx_hash", ""),
+                        })
+        except Exception:
+            pass
+
+    issues.sort(key=lambda x: x["ts"], reverse=True)
+    return issues[:n]
+
+
 def _is_cache_fresh(cached_at_str: str, now: "_dt", max_age_hours: float) -> bool:
     """Return True if the cached_at timestamp is within max_age_hours of now."""
     try:
@@ -991,6 +1073,7 @@ def index():
         knowledge_base=kb,
         loc=_count_lines_of_code(),
         last_refreshed=last_refreshed,
+        recent_issues=_get_recent_issues(),
     )
 
 
