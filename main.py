@@ -81,6 +81,76 @@ def _backfill_position_cg_ids():
         os.replace(tmp, pos_file)
 
 
+def _reconcile_positions(w3):
+    """
+    On startup: query on-chain balance for every recorded position.
+    If the wallet holds zero of a token we think we own, remove that lot
+    from positions.json so the bot doesn't keep trying to manage a ghost.
+    Skips removal if the RPC call fails (don't nuke valid positions due to
+    a connection hiccup).
+    """
+    pos_file = "data/positions.json"
+    if not os.path.exists(pos_file):
+        return
+    with open(pos_file) as f:
+        all_pos = json.load(f)
+
+    from bot.config import TOKENS
+    from bot import token_cache as _tc
+
+    ERC20_ABI = [{
+        "inputs":  [{"name": "account", "type": "address"}],
+        "name":    "balanceOf",
+        "outputs": [{"name": "", "type": "uint256"}],
+        "type":    "function",
+    }]
+
+    from eth_account import Account
+    from bot.config import PRIVATE_KEY
+    wallet = Account.from_key(PRIVATE_KEY).address
+
+    changed = False
+    for symbol in list(all_pos.keys()):
+        addr     = TOKENS.get(symbol, {}).get("address")
+        decimals = TOKENS.get(symbol, {}).get("decimals", 18)
+        if not addr:
+            cached = _tc.get_by_symbol(symbol)
+            if cached:
+                addr     = cached.get("address")
+                decimals = cached.get("decimals", 18)
+        if not addr:
+            logger.warning(f"Reconcile: no contract address for {symbol}, skipping")
+            continue
+        try:
+            contract  = w3.eth.contract(address=w3.to_checksum_address(addr), abi=ERC20_ABI)
+            bal_wei   = contract.functions.balanceOf(w3.to_checksum_address(wallet)).call()
+            bal_units = bal_wei / (10 ** decimals)
+        except Exception as e:
+            logger.warning(f"Reconcile: could not query {symbol} balance — skipping ({e})")
+            continue
+
+        recorded = sum(lot["amount_tokens"] for lot in all_pos[symbol])
+        if bal_units < recorded * 0.01:  # on-chain balance < 1% of what we think we hold
+            logger.error(
+                f"Reconcile: {symbol} on-chain balance {bal_units:.6f} vs recorded "
+                f"{recorded:.6f} — removing ghost position"
+            )
+            del all_pos[symbol]
+            changed = True
+        elif abs(bal_units - recorded) / max(recorded, 1e-9) > 0.1:
+            logger.warning(
+                f"Reconcile: {symbol} mismatch — on-chain {bal_units:.6f} "
+                f"vs recorded {recorded:.6f} (>10% diff, investigate)"
+            )
+
+    if changed:
+        tmp = pos_file + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(all_pos, f, indent=2)
+        os.replace(tmp, pos_file)
+        logger.info("Reconcile: positions.json updated")
+
+
 LAST_TICK_FILE = "data/last_tick.json"
 
 
@@ -98,6 +168,8 @@ def main():
 
     # Global startup: ensure all positions have cg_id for price tracking
     _backfill_position_cg_ids()
+    # Remove ghost positions where wallet balance is confirmed zero on-chain
+    _reconcile_positions(w3)
 
     wallet = Wallet(w3)
     market = Market(w3)

@@ -238,7 +238,7 @@ class Executor:
         token_out_price_usd: float = 0.0,
         take_profit_pct: float = 25.0,
         stop_loss_pct: float = 25.0,
-        max_hold_hours: float = 48.0,
+
         fee: int = DEFAULT_FEE,
         entry_reasoning: str = "",
         exit_reasoning: str = "",
@@ -437,7 +437,6 @@ class Executor:
                         tx_hash=tx_hash,
                         take_profit_pct=take_profit_pct,
                         stop_loss_pct=stop_loss_pct,
-                        max_hold_hours=max_hold_hours,
                         reasoning=entry_reasoning,
                         cg_id=cg_id,
                     )
