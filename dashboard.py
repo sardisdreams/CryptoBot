@@ -34,6 +34,36 @@ import certifi, requests as req
 
 app = Flask(__name__)
 
+_EST = timezone(timedelta(hours=-5))
+
+@app.template_filter("to_est")
+def _to_est(ts):
+    """Convert any UTC ISO/datetime string to EST for display."""
+    if not ts:
+        return ""
+    try:
+        s = str(ts).strip().replace("Z", "+00:00").replace(" ", "T")
+        dt = datetime.fromisoformat(s)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(_EST).strftime("%b %d %I:%M %p EST")
+    except Exception:
+        return str(ts)[:16]
+
+@app.template_filter("to_est_date")
+def _to_est_date(ts):
+    """Convert UTC ISO string to EST date only (for closed-trade date columns)."""
+    if not ts:
+        return ""
+    try:
+        s = str(ts).strip().replace("Z", "+00:00").replace(" ", "T")
+        dt = datetime.fromisoformat(s)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(_EST).strftime("%b %d, %Y")
+    except Exception:
+        return str(ts)[:10]
+
 # Basic auth — set DASHBOARD_USER and DASHBOARD_PASS in .env (optional, skip locally)
 DASH_USER = os.getenv("DASHBOARD_USER", "")
 DASH_PASS = os.getenv("DASHBOARD_PASS", "")
@@ -274,15 +304,11 @@ HTML = """
   <div class="section" style="margin-top:8px">
     <h2>All Holdings — Live On-Chain</h2>
     {% set pos_syms = open_positions | map(attribute='symbol') | map('upper') | list %}
+    {% set airdrop_syms = airdrop_tokens | map(attribute='symbol') | map('upper') | list %}
     {% set all_wallet = [] %}
     {% for sym, b in stats.balances.items() %}
-      {% if b.balance > 0.000001 %}
+      {% if b.balance > 0.000001 and sym not in airdrop_syms %}
         {% set _ = all_wallet.append({'symbol': sym, 'balance': b.balance, 'value_usd': b.value_usd, 'price': b.price, 'is_gas': b.is_gas, 'managed': sym in pos_syms, 'address': '', 'cg_id': '', 'source': 'wallet'}) %}
-      {% endif %}
-    {% endfor %}
-    {% for t in airdrop_tokens %}
-      {% if t.symbol not in (all_wallet | map(attribute='symbol') | list) %}
-        {% set _ = all_wallet.append({'symbol': t.symbol, 'balance': t.balance, 'value_usd': t.value_usd, 'price': t.price, 'is_gas': false, 'managed': false, 'address': t.address, 'cg_id': t.cg_id, 'source': 'airdrop'}) %}
       {% endif %}
     {% endfor %}
     {% if all_wallet %}
@@ -302,7 +328,6 @@ HTML = """
           {% if t.is_gas %}<span class="pill" style="background:#6366f122;color:#818cf8">Gas</span>
           {% elif t.symbol in ('USDC','USDT','DAI') %}<span class="pill" style="background:#22c55e22;color:#22c55e">Stable</span>
           {% elif t.managed %}<span class="pill" style="background:#3b82f622;color:#60a5fa">Bot</span>
-          {% elif t.source == 'airdrop' %}<span class="pill" style="background:#f59e0b22;color:#f59e0b">Airdrop</span>
           {% else %}<span class="pill" style="background:#94a3b822;color:#94a3b8">Untracked</span>
           {% endif %}
         </td>
@@ -387,7 +412,7 @@ HTML = """
       <tr><th>Time</th><th>Direction</th><th>Amount</th><th>Type</th><th>Reason</th><th>Tx</th></tr>
       {% for issue in recent_issues %}
       <tr>
-        <td style="color:#64748b;font-size:0.73rem;white-space:nowrap">{{ issue.ts[:16].replace("T"," ") }}</td>
+        <td style="color:#64748b;font-size:0.73rem;white-space:nowrap">{{ issue.ts | to_est }}</td>
         <td>{{ issue.token_in }} → {{ issue.token_out }}</td>
         <td>${{ "%.2f"|format(issue.amount_usd|float) }}</td>
         <td>
@@ -480,8 +505,8 @@ HTML = """
       {% for t in closed_trades %}
       <tr>
         <td><strong>{{ t.token }}</strong></td>
-        <td style="color:#64748b">{{ t.date_opened[:10] }}</td>
-        <td style="color:#64748b">{{ t.date_closed[:10] }}</td>
+        <td style="color:#64748b">{{ t.date_opened | to_est_date }}</td>
+        <td style="color:#64748b">{{ t.date_closed | to_est_date }}</td>
         <td>{{ "%.4f"|format(t.amount_tokens|float) }}</td>
         <td>${{ "%.2f"|format(t.cost_basis_usd|float) }}</td>
         <td>${{ "%.2f"|format(t.proceeds_usd|float) }}</td>
@@ -505,7 +530,7 @@ HTML = """
       <tr><th>Date</th><th>Sold</th><th>Amount</th><th>Bought</th><th>Gas</th><th>Status</th><th>Tx</th></tr>
       {% for t in transactions %}
       <tr>
-        <td style="color:#64748b;font-size:0.73rem">{{ t.date_utc }}</td>
+        <td style="color:#64748b;font-size:0.73rem">{{ t.date_utc | to_est }}</td>
         <td>{{ t.token_in }}</td>
         <td>${{ "%.2f"|format(t.amount_in|float) }}</td>
         <td>{{ t.token_out }}</td>
@@ -921,7 +946,7 @@ def _get_airdrop_tokens(w3, wallet_address: str, open_pos: list[dict], prices: d
             pass
 
     airdrops.sort(key=lambda x: x["value_usd"], reverse=True)
-    return airdrops
+    return [a for a in airdrops if a["value_usd"] >= 5.0]
 
 
 def _get_recent_issues(n: int = 30) -> list[dict]:
@@ -1236,9 +1261,7 @@ def index():
     analytics = _build_analytics(closed)
     kb = knowledge_module.get_all()
 
-    from datetime import datetime, timezone, timedelta
-    est = timezone(timedelta(hours=-5))
-    last_refreshed = datetime.now(est).strftime("%b %d, %Y %I:%M:%S %p EST")
+    last_refreshed = datetime.now(_EST).strftime("%b %d, %Y %I:%M:%S %p EST")
 
     airdrop_tokens = _get_airdrop_tokens(w3, wallet_address, open_pos, prices)
 
