@@ -205,6 +205,41 @@ def _atr(candles: list[dict], period: int = 14) -> float | None:
     return sum(trs[-period:]) / period
 
 
+def check_held_positions(open_positions: dict, prices: dict, btc_regime: str) -> list[dict]:
+    """
+    Score each held position using daily OHLCV. Return soft exit suggestions
+    for any position whose daily setup has deteriorated (score <= 25).
+    Replaces the old time-window expiry logic.
+    """
+    SKIP_SYMS = {"USDC", "USDT", "DAI", "WETH", "ETH"}
+    suggestions = []
+    for symbol, lots in open_positions.items():
+        if symbol in SKIP_SYMS:
+            continue
+        cg_id = next((lot["cg_id"] for lot in lots if lot.get("cg_id")), None)
+        if not cg_id:
+            continue
+        price = prices.get(symbol, 0)
+        if price <= 0:
+            continue
+        sig = score_entry(cg_id, symbol, price, btc_regime)
+        if sig["score"] <= 25:
+            total_tokens = sum(lot["amount_tokens"] for lot in lots)
+            failing = [c for c in sig.get("conditions", []) if c.startswith("✗")]
+            suggestions.append({
+                "symbol":        symbol,
+                "amount_tokens": total_tokens,
+                "reason":        (
+                    f"{symbol} signal deteriorated: {sig['score']}/100 — "
+                    + "; ".join(failing)
+                ),
+                "urgency":       "low",
+                "exit_type":     "signal_suggestion",
+                "signal_score":  sig["score"],
+            })
+    return suggestions
+
+
 def _no_data(symbol: str, cg_id: str) -> dict:
     return {
         "symbol": symbol, "cg_id": cg_id,

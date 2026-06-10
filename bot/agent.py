@@ -10,7 +10,7 @@ from bot import history, wiki, positions, blacklist, token_cache, knowledge, ris
 from bot.cost_tracker import record_anthropic, get_summary as get_cost_summary
 from bot.self_improve import run_self_analysis
 from bot.screener import get_screening_report
-from bot.signals import score_candidates as _score_candidates
+from bot.signals import score_candidates as _score_candidates, check_held_positions as _check_held_positions
 from bot.evaluator import score_coin, format_report
 from bot.liquidity import filter_liquid_coins
 
@@ -153,12 +153,12 @@ Always pass token_out_cg_id in the execute_swap call so the position can be trac
 
 ## Swing trading targets
 Fast in-out trades. Buy near weekly low, sell at TP, sit in USDC, repeat.
-Use tight parameters: take_profit_pct=8, stop_loss_pct=8, max_hold_hours=18.
+Use tight parameters: take_profit_pct=8, stop_loss_pct=8.
 
 Current swing targets:
 """ + "\n".join(
     f"- {sym}: {info['description']} | week range ${info['weekly_range_low']}–${info['weekly_range_high']} | "
-    f"TP +{info['take_profit_pct']}% SL -{info['stop_loss_pct']}% hold {info['max_hold_hours']}h"
+    f"TP +{info['take_profit_pct']}% SL -{info['stop_loss_pct']}%"
     for sym, info in SWING_TARGETS.items()
 ) + """
 
@@ -245,7 +245,6 @@ TOOLS = [
                 "amount_usd":         {"type": "number",  "description": "USD value of the trade"},
                 "take_profit_pct":    {"type": "number",  "description": "Take profit % above entry (e.g. 20 = sell 50% when up 20%). Required when buying."},
                 "stop_loss_pct":      {"type": "number",  "description": "Stop loss % below entry (e.g. 20 = sell all when down 20%). Required when buying."},
-                "max_hold_hours":     {"type": "number",  "description": "Hours before starting to look for exit (default 48). Soft suggestion, not forced."},
                 "reasoning":          {"type": "string",  "description": "Why you are making this trade"},
                 "token_out_cg_id":    {"type": "string",  "description": "CoinGecko ID of token being bought (e.g. 'venice-token'). Always provide when buying a non-standard token so it can be tracked for future pricing."},
                 "confidence":         {"type": "integer", "description": "Your conviction score 1-10. Trades with confidence < 6 are blocked. Be honest: 8-10=strong signal, 6-7=reasonable, 1-5=do not trade."},
@@ -346,11 +345,11 @@ class TradingAgent:
         for symbol, price in snapshot["prices"].items():
             lines.append(f"  {symbol}: ${price:,.4f}")
 
-        # Open positions detail
-        time_suggestions = snapshot.get("_time_exit_suggestions", [])
-        if time_suggestions:
-            lines += ["", "Hold window suggestions (soft — use your judgment):"]
-            for s in time_suggestions:
+        # Signal deterioration warnings for held positions
+        signal_suggestions = snapshot.get("_signal_exit_suggestions", [])
+        if signal_suggestions:
+            lines += ["", "Signal deterioration warnings (soft — evaluate whether thesis still holds):"]
+            for s in signal_suggestions:
                 lines.append(f"  - {s}")
 
         if open_pos:
@@ -805,7 +804,6 @@ class TradingAgent:
             token_out_price_usd=token_out_price,
             take_profit_pct=float(tool_input.get("take_profit_pct", 25.0)),
             stop_loss_pct=float(tool_input.get("stop_loss_pct", 25.0)),
-            max_hold_hours=float(tool_input.get("max_hold_hours", 48.0)),
             entry_reasoning=reasoning if token_in_sym in {"USDC", "USDT", "DAI"} else "",
             exit_reasoning=reasoning if token_in_sym not in {"USDC", "USDT", "DAI"} else "",
             cg_id=tool_input.get("token_out_cg_id", ""),
@@ -955,10 +953,15 @@ class TradingAgent:
                     # immediately re-trigger next tick
                     if tx and ex["exit_type"] == "take_profit":
                         positions.raise_take_profit(sym, ex.get("lot_id", ""), multiplier=1.5)
-            # Time suggestion — just log it, agent will handle in its reasoning
-            elif ex["exit_type"] == "time_suggestion":
-                snapshot["_time_exit_suggestions"] = snapshot.get("_time_exit_suggestions", [])
-                snapshot["_time_exit_suggestions"].append(reason)
+
+        # Signal-based exit suggestions for held positions (replaces time window)
+        fg_val_pre  = context.get("fear_and_greed", {}).get("value", 50)
+        btc_ind_pre = history.get_indicators("cbBTC")
+        regime_pre  = history.get_market_regime(btc_ind_pre, fg_val_pre)
+        held_exits  = _check_held_positions(
+            positions.get_open_positions(), snapshot["prices"], regime_pre["regime"]
+        )
+        snapshot["_signal_exit_suggestions"] = [ex["reason"] for ex in held_exits]
 
         # Discover new opportunities
         screening = get_screening_report()

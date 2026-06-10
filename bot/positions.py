@@ -60,20 +60,17 @@ def open_position(
     tx_hash: str,
     take_profit_pct: float = 25.0,
     stop_loss_pct: float = 25.0,
-    max_hold_hours: float = 48.0,
     reasoning: str = "",
     cg_id: str = "",
 ) -> str:
-    """Record a new buy with TP/SL/time targets. Returns the position ID."""
-    from datetime import timedelta
+    """Record a new buy with TP/SL targets. Returns the position ID."""
     positions = _load()
     if symbol not in positions:
         positions[symbol] = []
 
-    position_id      = str(uuid.uuid4())[:8]
+    position_id       = str(uuid.uuid4())[:8]
     take_profit_price = round(entry_price_usd * (1 + take_profit_pct / 100), 6)
     stop_loss_price   = round(entry_price_usd * (1 - stop_loss_pct  / 100), 6)
-    max_hold_until    = (datetime.now(timezone.utc) + timedelta(hours=max_hold_hours)).isoformat()
 
     positions[symbol].append({
         "id":                position_id,
@@ -85,7 +82,6 @@ def open_position(
         "entry_tx":          tx_hash,
         "take_profit_price": take_profit_price,
         "stop_loss_price":   stop_loss_price,
-        "max_hold_until":    max_hold_until,
         "take_profit_pct":   take_profit_pct,
         "stop_loss_pct":     stop_loss_pct,
         "entry_reasoning":   reasoning,
@@ -280,23 +276,6 @@ def check_mechanical_exits(current_prices: dict[str, float]) -> list[dict]:
                     "exit_type":     "take_profit",
                 })
 
-            # Time window passed — flag for agent to evaluate exit, not forced
-            elif until:
-                try:
-                    expiry = datetime.fromisoformat(until)
-                    if now >= expiry:
-                        gain_pct = (current_price - lot["entry_price_usd"]) / lot["entry_price_usd"] * 100
-                        exits.append({
-                            "symbol":        symbol,
-                            "amount_tokens": lot["amount_tokens"],
-                            "lot_id":        lot["id"],
-                            "reason":        f"HOLD WINDOW EXPIRED — look for exit ({gain_pct:+.1f}%). Not forced.",
-                            "urgency":       "low",
-                            "exit_type":     "time_suggestion",
-                        })
-                except Exception:
-                    pass
-
     return exits
 
 
@@ -320,17 +299,6 @@ def get_position_summary(current_prices: dict[str, float]) -> list[dict]:
             date_open = datetime.fromisoformat(lot["date_opened"])
             hold_days = (datetime.now(timezone.utc) - date_open).days
 
-            # Time remaining on max hold
-            until = lot.get("max_hold_until")
-            hours_remaining = None
-            if until:
-                try:
-                    expiry = datetime.fromisoformat(until)
-                    diff = (expiry - datetime.now(timezone.utc)).total_seconds() / 3600
-                    hours_remaining = round(diff, 1)
-                except Exception:
-                    pass
-
             summary.append({
                 "id":                lot["id"],
                 "symbol":            symbol,
@@ -345,9 +313,9 @@ def get_position_summary(current_prices: dict[str, float]) -> list[dict]:
                 "hold_days":         hold_days,
                 "take_profit_price": lot.get("take_profit_price"),
                 "stop_loss_price":   lot.get("stop_loss_price"),
-                "hours_remaining":   hours_remaining,
                 "take_profit_pct":   lot.get("take_profit_pct", 25),
                 "stop_loss_pct":     lot.get("stop_loss_pct", 25),
+                "cg_id":             lot.get("cg_id", ""),
             })
 
     return summary

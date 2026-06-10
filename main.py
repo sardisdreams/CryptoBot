@@ -6,7 +6,7 @@ import time
 import certifi
 import schedule
 import requests
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from web3 import Web3
 from dotenv import load_dotenv
 
@@ -81,9 +81,7 @@ def _backfill_position_cg_ids():
         os.replace(tmp, pos_file)
 
 
-LAST_TICK_FILE     = "data/last_tick.json"
-MIN_DOWNTIME_HOURS = 2.0    # gaps shorter than this are ignored (normal restarts)
-MAX_EXTENSION_HOURS = 168.0 # never extend by more than 7 days
+LAST_TICK_FILE = "data/last_tick.json"
 
 
 def _record_tick():
@@ -93,70 +91,6 @@ def _record_tick():
         json.dump({"ts": datetime.now(timezone.utc).isoformat()}, f)
 
 
-def _adjust_positions_for_downtime():
-    """
-    If the bot was offline for an extended period, extend all open positions'
-    max_hold_until by the downtime so the agent can evaluate them fresh rather
-    than treating them as immediately overdue.
-    """
-    if not os.path.exists(LAST_TICK_FILE):
-        _record_tick()
-        return
-
-    with open(LAST_TICK_FILE) as f:
-        data = json.load(f)
-
-    now = datetime.now(timezone.utc)
-    try:
-        last_tick = datetime.fromisoformat(data["ts"])
-        # Ensure tz-aware so subtraction doesn't raise TypeError on naive timestamps
-        if last_tick.tzinfo is None:
-            last_tick = last_tick.replace(tzinfo=timezone.utc)
-        gap_hours = (now - last_tick).total_seconds() / 3600
-    except Exception:
-        _record_tick()
-        return
-    if gap_hours < MIN_DOWNTIME_HOURS:
-        return
-
-    extension = min(gap_hours, MAX_EXTENSION_HOURS)
-    logger.info(f"Detected {gap_hours:.1f}h downtime — extending all position hold windows by {extension:.1f}h")
-
-    pos_file = "data/positions.json"
-    if not os.path.exists(pos_file):
-        return
-    with open(pos_file) as f:
-        all_pos = json.load(f)
-
-    changed = False
-    for symbol, lots in all_pos.items():
-        for lot in lots:
-            until_str = lot.get("max_hold_until")
-            if not until_str:
-                continue
-            try:
-                expiry     = datetime.fromisoformat(until_str)
-                new_expiry = expiry + timedelta(hours=extension)
-                lot["max_hold_until"] = new_expiry.isoformat()
-                logger.info(
-                    f"  {symbol}: hold window extended {extension:.1f}h → "
-                    f"{new_expiry.strftime('%Y-%m-%d %H:%M')} UTC"
-                )
-                changed = True
-            except Exception:
-                pass
-
-    if changed:
-        tmp = pos_file + ".tmp"
-        with open(tmp, "w") as f:
-            json.dump(all_pos, f, indent=2)
-        os.replace(tmp, pos_file)
-
-    # Update last_tick immediately so a crash-restart loop doesn't re-apply
-    # the same extension on every restart before run_once() succeeds.
-    _record_tick()
-
-
 def main():
     validate()
 
@@ -164,9 +98,6 @@ def main():
 
     # Global startup: ensure all positions have cg_id for price tracking
     _backfill_position_cg_ids()
-
-    # Extend hold windows for any downtime since last successful tick
-    _adjust_positions_for_downtime()
 
     wallet = Wallet(w3)
     market = Market(w3)

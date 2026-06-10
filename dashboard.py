@@ -299,7 +299,7 @@ HTML = """
       <tr>
         <th>Token</th><th>Amount</th><th>Entry</th><th>Current</th>
         <th>Cost</th><th>Value</th><th>P&L $</th><th>P&L %</th>
-        <th>Take Profit</th><th>TP Profit</th><th>Stop Loss</th><th>SL Risk</th><th>Window</th>
+        <th>Take Profit</th><th>TP Profit</th><th>Stop Loss</th><th>SL Risk</th><th>Hold Days</th>
       </tr>
       {% for p in open_positions %}
       <tr>
@@ -344,8 +344,8 @@ HTML = """
             <span class="neg" style="font-size:0.65rem;">{{ "%.0f"|format(sl_progress) }}%</span>
           {% else %}—{% endif %}
         </td>
-        <td {% if p.hours_remaining is not none and p.hours_remaining < 4 %}class="warn"{% endif %}>
-          {% if p.hours_remaining is not none %}{% if p.hours_remaining < 0 %}Expired{% else %}{{ p.hours_remaining }}h{% endif %}{% else %}—{% endif %}
+        <td {% if p.hold_days >= 7 %}class="warn"{% endif %}>
+          {{ p.hold_days }}d
         </td>
       </tr>
       {% endfor %}
