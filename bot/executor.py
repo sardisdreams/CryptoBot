@@ -1,9 +1,13 @@
 import time
+import os
+import json
+from datetime import datetime, timezone
 from web3 import Web3
 from bot.config import (
     UNISWAP_V3_ROUTER, UNISWAP_V3_QUOTER,
     SLIPPAGE_TOLERANCE, SLIPPAGE_TOLERANCE_LOWCAP, SLIPPAGE_MAX, MAX_PRICE_IMPACT,
     HIGH_LIQUIDITY_TOKENS, GAS_LIMIT, BASE_CHAIN_ID, DEFAULT_FEE, WETH_ADDRESS, STABLECOINS,
+    TOKENS,
 )
 from bot.wallet import Wallet
 from bot.logger import setup_logger
@@ -15,6 +19,34 @@ from bot.thegraph import check_pool_liquidity
 from bot.emailer import send_trade_notification
 
 logger = setup_logger("executor")
+
+_BLOCKS_FILE  = "data/trade_blocks.json"
+_KEEP_BLOCKS  = 100
+
+
+def _log_swap_block(token_in: str, token_out: str, amount_usd: float, reason: str):
+    """Persist every executor-level swap rejection to the dashboard trade-issues feed."""
+    os.makedirs("data", exist_ok=True)
+    try:
+        blocks = json.load(open(_BLOCKS_FILE)) if os.path.exists(_BLOCKS_FILE) else []
+    except Exception:
+        blocks = []
+    blocks.append({
+        "ts":         datetime.now(timezone.utc).isoformat(),
+        "token_in":   token_in,
+        "token_out":  token_out,
+        "amount_usd": round(amount_usd, 2),
+        "reason":     reason,
+    })
+    blocks = blocks[-_KEEP_BLOCKS:]
+    try:
+        tmp = _BLOCKS_FILE + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(blocks, f, indent=2)
+        os.replace(tmp, _BLOCKS_FILE)
+    except Exception:
+        pass
+
 
 ROUTER_ABI = [
     {
@@ -253,6 +285,8 @@ class Executor:
             logger.warning("Swap rejected: amount_in_wei must be positive")
             return None
 
+        _amt_usd_approx = (amount_in_wei / 10 ** token_in_decimals) * (token_in_price_usd or 1)
+
         # Dusting attack protection: refuse to sell any token the bot never bought.
         # Malicious tokens are sometimes airdropped to wallets — interacting with them
         # (calling approve or transferring) can drain the wallet via malicious contracts.
@@ -260,10 +294,9 @@ class Executor:
         if is_sell and token_in_symbol not in {"WETH", "cbBTC", "cbETH"}:
             open_pos = positions.get_open_positions()
             if token_in_symbol not in open_pos:
-                logger.warning(
-                    f"Dusting attack protection: refusing to sell {token_in_symbol} — "
-                    f"no tracked position found. Token may have been airdropped."
-                )
+                msg = f"Dusting protection: {token_in_symbol} not in tracked positions — refusing sell"
+                logger.warning(msg)
+                _log_swap_block(token_in_symbol, token_out_symbol, _amt_usd_approx, msg)
                 return None
 
         # Try Uniswap V3 first, fall back to Aerodrome
@@ -280,7 +313,9 @@ class Executor:
                 dex_used = "aerodrome"
 
         if amount_out == 0:
-            logger.warning("Swap skipped: no liquidity on Uniswap V3 or Aerodrome")
+            msg = f"No liquidity: {token_in_symbol}→{token_out_symbol} returned 0 quote on V3 and Aerodrome"
+            logger.warning(msg)
+            _log_swap_block(token_in_symbol, token_out_symbol, _amt_usd_approx, msg)
             return None
 
         # Price impact check — protect against near-zero liquidity pools
@@ -289,17 +324,15 @@ class Executor:
         # Block buys when we have no reference price for the token we're buying
         is_buy = token_in_symbol in STABLECOINS and token_out_symbol not in STABLECOINS
         if is_buy and token_out_price_usd <= 0:
-            logger.warning(
-                f"Swap rejected: no reference price for {token_out_symbol}. "
-                f"Cannot verify execution quality without a market price."
-            )
+            msg = f"No reference price for {token_out_symbol} — cannot verify execution quality"
+            logger.warning(msg)
+            _log_swap_block(token_in_symbol, token_out_symbol, _amt_usd_approx, msg)
             return None
 
         if token_in_price_usd > 0 and token_out_price_usd > 0:
             # Use known decimals for registry tokens; fall back to 18 for custom tokens.
-            # The old inference loop ([18,8,6]) was wrong: USDC (6 dec) raw output like
-            # 11_500_000 passes the ">0.01" check at dec=8, giving $0.115 instead of $11.50
-            # and making every sell look like 99% price impact.
+            # IMPORTANT: do NOT use a stablecoin check — DAI is a stablecoin with 18 decimals,
+            # not 6. Always use TOKENS dict or default 18.
             token_out_dec = TOKENS.get(token_out_symbol, {}).get("decimals", 18)
             amount_out_tokens = amount_out / (10 ** token_out_dec)
             amount_out_usd    = amount_out_tokens * token_out_price_usd
@@ -309,10 +342,9 @@ class Executor:
                 price_impact = (amount_in_usd - amount_out_usd) / amount_in_usd
                 logger.info(f"Price impact: {price_impact:.1%} (in ${amount_in_usd:.2f} → out ${amount_out_usd:.2f})")
                 if price_impact > MAX_PRICE_IMPACT:
-                    logger.warning(
-                        f"Swap rejected: price impact {price_impact:.1%} exceeds {MAX_PRICE_IMPACT:.0%} max. "
-                        f"Token likely has insufficient liquidity on Base."
-                    )
+                    msg = f"Price impact {price_impact:.1%} exceeds {MAX_PRICE_IMPACT:.0%} max for {token_in_symbol}→{token_out_symbol}"
+                    logger.warning(msg)
+                    _log_swap_block(token_in_symbol, token_out_symbol, amount_in_usd, msg)
                     return None
 
             # Execution price check: compare on-chain implied price to CoinGecko reference.
@@ -322,11 +354,10 @@ class Executor:
                 price_premium = (implied_price - token_out_price_usd) / token_out_price_usd
                 logger.info(f"Execution price check: implied ${implied_price:.6f} vs reference ${token_out_price_usd:.6f} ({price_premium:+.1%})")
                 if price_premium > 0.10:
-                    logger.warning(
-                        f"Swap rejected: on-chain price ${implied_price:.6f} is {price_premium:.1%} above "
-                        f"CoinGecko reference ${token_out_price_usd:.6f} for {token_out_symbol}. "
-                        f"Pool likely has near-zero liquidity on Base."
-                    )
+                    msg = (f"On-chain price ${implied_price:.6f} is {price_premium:.1%} above "
+                           f"CoinGecko ${token_out_price_usd:.6f} for {token_out_symbol} — pool likely empty")
+                    logger.warning(msg)
+                    _log_swap_block(token_in_symbol, token_out_symbol, amount_in_usd, msg)
                     return None
 
         # Gas cost check — skip trade if gas > 2% of trade size
@@ -337,10 +368,9 @@ class Executor:
             gas_cost_usd = gas_cost_eth * eth_price if eth_price > 0 else 0
             trade_usd = (amount_in_wei / 10 ** token_in_decimals) * token_in_price_usd
             if gas_cost_usd > 0 and trade_usd > 0 and (gas_cost_usd / trade_usd) > 0.02:
-                logger.warning(
-                    f"Swap skipped: gas cost ${gas_cost_usd:.3f} is {gas_cost_usd/trade_usd:.1%} of trade "
-                    f"${trade_usd:.2f} — exceeds 2% threshold"
-                )
+                msg = f"Gas ${gas_cost_usd:.3f} is {gas_cost_usd/trade_usd:.1%} of trade ${trade_usd:.2f} — exceeds 2%"
+                logger.warning(msg)
+                _log_swap_block(token_in_symbol, token_out_symbol, trade_usd, msg)
                 return None
 
         # TheGraph liquidity check for buys — ensures pool has enough depth
@@ -401,7 +431,9 @@ class Executor:
                     "gas":   tx["gas"],
                 })
             except Exception as sim_err:
-                logger.warning(f"Transaction simulation failed — skipping to avoid wasted gas: {sim_err}")
+                msg = f"Transaction simulation failed for {token_in_symbol}→{token_out_symbol}: {sim_err}"
+                logger.warning(msg)
+                _log_swap_block(token_in_symbol, token_out_symbol, _amt_usd_approx, msg)
                 return None
 
             tx_hash = self.wallet.sign_and_send(tx)
@@ -425,9 +457,15 @@ class Executor:
             gas_eth = (receipt["gasUsed"] * float(self.w3.from_wei(gas_price, "gwei"))) / 1e9
             record_gas(gas_eth, price_eth_usd)
 
+            if status != "success":
+                msg = f"On-chain swap failed (tx reverted): {token_in_symbol}→{token_out_symbol} | tx {tx_hash[:12]}"
+                logger.warning(msg)
+                _log_swap_block(token_in_symbol, token_out_symbol, _amt_usd_approx, msg)
+
             if status == "success":
-                amount_in_tokens = amount_in_wei / 10 ** token_in_decimals
-                amount_out_tokens = amount_out / 10 ** 6 if token_out_symbol in STABLECOINS else amount_out / 10 ** 18
+                amount_in_tokens  = amount_in_wei / 10 ** token_in_decimals
+                _out_dec          = TOKENS.get(token_out_symbol, {}).get("decimals", 18)
+                amount_out_tokens = amount_out / (10 ** _out_dec)
 
                 # Buying a non-stable token → open position
                 if token_in_symbol in STABLECOINS and token_out_symbol not in STABLECOINS:
