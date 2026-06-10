@@ -976,6 +976,9 @@ class TradingAgent:
                         cached = token_cache.get_by_symbol(sym)
                         if cached:
                             price = cached.get("price", 0)
+                    if price <= 0:
+                        logger.error(f"Mechanical exit {sym}: no price available, skipping this tick")
+                        continue
                     tx = self.executor.swap(
                         token_in_address=token_info["address"],
                         token_in_symbol=sym,
@@ -987,9 +990,9 @@ class TradingAgent:
                         token_out_price_usd=1.0,
                         exit_reasoning=f"Mechanical {ex['exit_type']}: {reason}",
                     )
-                    # After partial TP: raise the remaining lot's TP so it doesn't
-                    # immediately re-trigger next tick
-                    if tx and ex["exit_type"] == "take_profit":
+                    # Always raise TP after a take-profit triggers — even if the swap
+                    # failed — so a blocked exit doesn't re-trigger every tick.
+                    if ex["exit_type"] == "take_profit":
                         positions.raise_take_profit(sym, ex.get("lot_id", ""), multiplier=1.5)
 
         # Signal-based exit suggestions for held positions (replaces time window)

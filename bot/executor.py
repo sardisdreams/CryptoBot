@@ -296,12 +296,13 @@ class Executor:
             return None
 
         if token_in_price_usd > 0 and token_out_price_usd > 0:
-            # Infer token_out decimals from amount
-            for dec in [18, 8, 6]:
-                amount_out_tokens = amount_out / (10 ** dec)
-                amount_out_usd    = amount_out_tokens * token_out_price_usd
-                if amount_out_usd > 0.01:
-                    break
+            # Use known decimals for registry tokens; fall back to 18 for custom tokens.
+            # The old inference loop ([18,8,6]) was wrong: USDC (6 dec) raw output like
+            # 11_500_000 passes the ">0.01" check at dec=8, giving $0.115 instead of $11.50
+            # and making every sell look like 99% price impact.
+            token_out_dec = TOKENS.get(token_out_symbol, {}).get("decimals", 18)
+            amount_out_tokens = amount_out / (10 ** token_out_dec)
+            amount_out_usd    = amount_out_tokens * token_out_price_usd
 
             # Standard price impact: are we getting fair value out?
             if amount_in_usd > 0:
