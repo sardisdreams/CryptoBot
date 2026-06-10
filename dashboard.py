@@ -151,6 +151,7 @@ HTML = """
   <div class="tab" onclick="showTab('history')">Trade History</div>
   <div class="tab" onclick="showTab('analytics')">Analytics</div>
   <div class="tab" onclick="showTab('knowledge')">Knowledge Base</div>
+  <div class="tab" onclick="showTab('airdrops')">Airdrops{% if airdrop_tokens %} <span style="background:#f59e0b;color:#000;border-radius:8px;padding:1px 6px;font-size:0.65rem;margin-left:4px">{{ airdrop_tokens|length }}</span>{% endif %}</div>
 </div>
 
 <!-- TAB: PORTFOLIO -->
@@ -590,6 +591,48 @@ HTML = """
 </div>
 </div><!-- end tab-knowledge -->
 
+<!-- TAB: AIRDROPS -->
+<div id="tab-airdrops" class="tab-content">
+<div class="container">
+  <div class="section" style="margin-top:16px">
+    <h2>Untracked Wallet Tokens (Airdrops &amp; Gifts)</h2>
+    <p style="color:#64748b;font-size:0.78rem;margin-bottom:12px">
+      Tokens found in your wallet that the bot did not buy. These are not managed or traded by the bot.
+      Scanned via Alchemy ERC-20 balance query on each page load.
+    </p>
+    {% if airdrop_tokens %}
+    <table>
+      <tr>
+        <th>Token</th>
+        <th>Balance</th>
+        <th>Price</th>
+        <th>Value</th>
+        <th>Contract</th>
+      </tr>
+      {% for t in airdrop_tokens %}
+      <tr>
+        <td>
+          {% if t.cg_id %}
+          <a href="https://www.coingecko.com/en/coins/{{ t.cg_id }}" target="_blank" class="cglink">{{ t.symbol }}</a>
+          {% else %}
+          <span style="font-weight:600">{{ t.symbol }}</span>
+          {% endif %}
+          {% if t.name %}<span style="color:#475569;font-size:0.7rem;display:block">{{ t.name }}</span>{% endif %}
+        </td>
+        <td>{{ "%.4f"|format(t.balance|float) }}</td>
+        <td>{% if t.price %}<span style="color:#94a3b8">${{ "%.6f"|format(t.price|float) }}</span>{% else %}<span style="color:#475569">unknown</span>{% endif %}</td>
+        <td>{% if t.value_usd %}<span class="{{ 'pos' if t.value_usd > 1 else '' }}">${{ "%.2f"|format(t.value_usd|float) }}</span>{% else %}—{% endif %}</td>
+        <td><a href="https://basescan.org/token/{{ t.address }}" target="_blank" class="hash">{{ t.address[:10] }}...{{ t.address[-6:] }}</a></td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% else %}
+    <div class="empty">No untracked tokens found in wallet</div>
+    {% endif %}
+  </div>
+</div>
+</div><!-- end tab-airdrops -->
+
 <script>
 function showTab(name) {
   document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
@@ -741,6 +784,122 @@ ERC20_ABI = [{"inputs": [{"name": "account", "type": "address"}],
 import logging
 from datetime import datetime as _dt, timezone as _tz
 _log = logging.getLogger("dashboard")
+
+
+def _get_airdrop_tokens(w3, wallet_address: str, open_pos: list[dict], prices: dict) -> list[dict]:
+    """
+    Return tokens in the wallet that the bot did not buy.
+    Uses Alchemy's alchemy_getTokenBalances to scan every ERC-20 balance,
+    then subtracts registry tokens and bot-managed positions.
+    Falls back to checking token_cache tokens if the Alchemy call fails.
+    """
+    from bot.config import TOKENS
+    from bot import token_cache as _tc
+
+    SKIP_SYMS = set(TOKENS.keys()) | {"ETH", "WETH"}
+    bot_syms   = {p["symbol"].upper() for p in open_pos}
+
+    ERC20_META_ABI = [
+        {"inputs": [], "name": "symbol",   "outputs": [{"type": "string"}], "type": "function"},
+        {"inputs": [], "name": "decimals",  "outputs": [{"type": "uint8"}],  "type": "function"},
+        {"inputs": [], "name": "name",      "outputs": [{"type": "string"}], "type": "function"},
+        {"inputs": [{"name": "account", "type": "address"}],
+         "name": "balanceOf", "outputs": [{"type": "uint256"}], "type": "function"},
+    ]
+
+    airdrops = []
+    seen_addresses = set()
+
+    # ── Primary: Alchemy full wallet scan ────────────────────────────────────
+    try:
+        resp = w3.provider.make_request(
+            "alchemy_getTokenBalances",
+            [wallet_address, "erc20"],
+        )
+        token_balances = resp.get("result", {}).get("tokenBalances", [])
+        for tb in token_balances:
+            addr = tb.get("contractAddress", "").lower()
+            bal_hex = tb.get("tokenBalance", "0x0")
+            if bal_hex in ("0x", "0x0", None):
+                continue
+            try:
+                bal_raw = int(bal_hex, 16)
+            except ValueError:
+                continue
+            if bal_raw == 0:
+                continue
+            seen_addresses.add(addr)
+            # Resolve symbol from token_cache or on-chain
+            cached = _tc.get(addr)
+            sym      = (cached.get("symbol", "") if cached else "").upper()
+            decimals = cached.get("decimals", 18) if cached else 18
+            name     = cached.get("name", "") if cached else ""
+            cg_id    = (cached.get("cg_id") or "") if cached else ""
+            if not sym:
+                try:
+                    c   = w3.eth.contract(address=Web3.to_checksum_address(addr), abi=ERC20_META_ABI)
+                    sym      = c.functions.symbol().call()
+                    decimals = c.functions.decimals().call()
+                    name     = c.functions.name().call()
+                except Exception:
+                    sym = addr[:8]
+            sym = sym.upper()
+            if sym in SKIP_SYMS or sym in bot_syms:
+                continue
+            balance = bal_raw / (10 ** decimals)
+            if balance < 1e-9:
+                continue
+            price     = prices.get(sym, 0)
+            value_usd = balance * price
+            airdrops.append({
+                "symbol":    sym,
+                "name":      name,
+                "address":   addr,
+                "balance":   balance,
+                "value_usd": round(value_usd, 4),
+                "price":     price,
+                "cg_id":     cg_id,
+                "source":    "alchemy_scan",
+            })
+    except Exception as e:
+        _log.warning(f"Alchemy token scan failed, using cache fallback: {e}")
+
+    # ── Fallback: check token_cache for anything we missed ───────────────────
+    tc_all = _tc.list_all()
+    for cg_id_key, info in tc_all.items():
+        addr = (info.get("address") or "").lower()
+        if not addr or addr in seen_addresses:
+            continue
+        sym = (info.get("symbol") or "").upper()
+        if not sym or sym in SKIP_SYMS or sym in bot_syms:
+            continue
+        try:
+            contract = w3.eth.contract(
+                address=Web3.to_checksum_address(addr), abi=ERC20_META_ABI
+            )
+            bal_raw  = contract.functions.balanceOf(Web3.to_checksum_address(wallet_address)).call()
+            decimals = info.get("decimals", 18)
+            balance  = bal_raw / (10 ** decimals)
+            if balance < 1e-9:
+                continue
+            price     = prices.get(sym, info.get("price", 0))
+            value_usd = balance * price
+            airdrops.append({
+                "symbol":    sym,
+                "name":      info.get("name", ""),
+                "address":   addr,
+                "balance":   balance,
+                "value_usd": round(value_usd, 4),
+                "price":     price,
+                "cg_id":     cg_id_key,
+                "source":    "cache_fallback",
+            })
+            seen_addresses.add(addr)
+        except Exception:
+            pass
+
+    airdrops.sort(key=lambda x: x["value_usd"], reverse=True)
+    return airdrops
 
 
 def _get_recent_issues(n: int = 30) -> list[dict]:
@@ -1059,6 +1218,8 @@ def index():
     est = timezone(timedelta(hours=-5))
     last_refreshed = datetime.now(est).strftime("%b %d, %Y %I:%M:%S %p EST")
 
+    airdrop_tokens = _get_airdrop_tokens(w3, wallet_address, open_pos, prices)
+
     return render_template_string(
         HTML,
         stats=stats,
@@ -1074,6 +1235,7 @@ def index():
         loc=_count_lines_of_code(),
         last_refreshed=last_refreshed,
         recent_issues=_get_recent_issues(),
+        airdrop_tokens=airdrop_tokens,
     )
 
 
