@@ -264,12 +264,14 @@ def check_mechanical_exits(current_prices: dict[str, float]) -> list[dict]:
                     "exit_type":     "stop_loss",
                 })
 
-            # Take profit — sell 50% of lot
+            # Take profit — sell 50% of lot (100% if position too small to split)
             elif tp and current_price >= tp:
-                gain_pct = (current_price - lot["entry_price_usd"]) / lot["entry_price_usd"] * 100
+                gain_pct    = (current_price - lot["entry_price_usd"]) / lot["entry_price_usd"] * 100
+                lot_value   = lot["amount_tokens"] * current_price
+                sell_tokens = lot["amount_tokens"] if lot_value < 40 else lot["amount_tokens"] * 0.5
                 exits.append({
                     "symbol":        symbol,
-                    "amount_tokens": lot["amount_tokens"] * 0.5,
+                    "amount_tokens": sell_tokens,
                     "lot_id":        lot["id"],
                     "reason":        f"TAKE PROFIT hit at ${current_price:.4f} ({gain_pct:+.1f}%)",
                     "urgency":       "normal",

@@ -752,8 +752,9 @@ class TradingAgent:
             if not ok:
                 return cooldown_reason
 
-        # Enforce minimum trade size
-        if amount_usd < _min_t:
+        # Enforce minimum trade size — buys only; never block exits of existing positions
+        is_buy = token_in_sym in {"USDC", "USDT", "DAI"}
+        if is_buy and amount_usd < _min_t:
             return f"Trade too small: ${amount_usd:.2f} is below minimum ${_min_t:.2f}"
 
         # Enforce maximum single trade size
