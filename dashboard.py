@@ -269,27 +269,49 @@ HTML = """
     </div>
   </div>
 
-  <!-- ROW 3: CURRENT HOLDINGS -->
-  <div class="row-label">Current Holdings</div>
-  <div class="grid grid-pos">
-    {% for p in open_positions %}
-    <div class="card" style="{% if p.gain_loss_pct >= 0 %}background:#1a3d28;border-color:#1e8a3a;{% else %}background:#3d1618;border-color:#c5221f;{% endif %}">
-      <div class="label">
-        {% if p.cg_url %}<a href="{{ p.cg_url }}" target="_blank" class="cglink">{{ p.symbol }}</a>
-        {% else %}{{ p.symbol }}{% endif %}
-        <span style="font-size:0.62rem;color:#475569;margin-left:4px">{{ "%.4f"|format(p.amount_tokens) }}</span>
-      </div>
-      <div class="value sm {{ 'pos' if p.gain_loss_pct >= 0 else 'neg' }}">
-        ${{ "%.2f"|format(p.current_value if p.current_value > 0 else p.cost_basis_usd) }}
-      </div>
-      <div class="sub {{ 'pos' if p.gain_loss_pct >= 0 else 'neg' }}">
-        {% if p.cost_basis_usd > 0 %}{{ "%+.2f"|format(p.gain_loss_pct) }}% &nbsp; ${{ "%+.2f"|format(p.gain_loss_usd) }}
-        {% else %}Cost: ${{ "%.2f"|format(p.cost_basis_usd) }}{% endif %}
-      </div>
-    </div>
-    {% else %}
-    <div style="color:#475569;font-size:0.8rem;padding:8px 0">No open positions</div>
+  <!-- ROW 3: WALLET BALANCES (all on-chain holdings) -->
+  <div class="row-label">Wallet Balances</div>
+  <div class="section" style="margin-top:8px">
+    <h2>All Holdings — Live On-Chain</h2>
+    {% set pos_syms = open_positions | map(attribute='symbol') | map('upper') | list %}
+    {% set all_wallet = [] %}
+    {% for sym, b in stats.balances.items() %}
+      {% if b.balance > 0.000001 %}
+        {% set _ = all_wallet.append({'symbol': sym, 'balance': b.balance, 'value_usd': b.value_usd, 'price': b.price, 'is_gas': b.is_gas, 'managed': sym in pos_syms, 'address': '', 'cg_id': '', 'source': 'wallet'}) %}
+      {% endif %}
     {% endfor %}
+    {% for t in airdrop_tokens %}
+      {% if t.symbol not in (all_wallet | map(attribute='symbol') | list) %}
+        {% set _ = all_wallet.append({'symbol': t.symbol, 'balance': t.balance, 'value_usd': t.value_usd, 'price': t.price, 'is_gas': false, 'managed': false, 'address': t.address, 'cg_id': t.cg_id, 'source': 'airdrop'}) %}
+      {% endif %}
+    {% endfor %}
+    {% if all_wallet %}
+    <table>
+      <tr><th>Token</th><th>Balance</th><th>Price</th><th>Value</th><th>Type</th></tr>
+      {% for t in all_wallet | sort(attribute='value_usd', reverse=true) %}
+      <tr>
+        <td style="font-weight:600">
+          {% if t.cg_id %}<a href="https://www.coingecko.com/en/coins/{{ t.cg_id }}" target="_blank" class="cglink">{{ t.symbol }}</a>
+          {% elif t.address %}<a href="https://basescan.org/token/{{ t.address }}" target="_blank" class="cglink">{{ t.symbol }}</a>
+          {% else %}{{ t.symbol }}{% endif %}
+        </td>
+        <td>{{ "%.4f"|format(t.balance|float) }}</td>
+        <td>{% if t.price %}<span style="color:#94a3b8">${{ "%.6f"|format(t.price|float) }}</span>{% else %}<span style="color:#475569">—</span>{% endif %}</td>
+        <td class="{{ 'pos' if t.value_usd > 0 else '' }}">${{ "%.2f"|format(t.value_usd|float) }}</td>
+        <td>
+          {% if t.is_gas %}<span class="pill" style="background:#6366f122;color:#818cf8">Gas</span>
+          {% elif t.symbol in ('USDC','USDT','DAI') %}<span class="pill" style="background:#22c55e22;color:#22c55e">Stable</span>
+          {% elif t.managed %}<span class="pill" style="background:#3b82f622;color:#60a5fa">Bot</span>
+          {% elif t.source == 'airdrop' %}<span class="pill" style="background:#f59e0b22;color:#f59e0b">Airdrop</span>
+          {% else %}<span class="pill" style="background:#94a3b822;color:#94a3b8">Untracked</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% else %}
+    <div class="empty">No wallet balances found</div>
+    {% endif %}
   </div>
 
   <!-- OPEN POSITIONS DETAIL -->
