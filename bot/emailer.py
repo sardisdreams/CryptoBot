@@ -88,3 +88,25 @@ View dashboard: http://143.198.37.28:5000
 
     except Exception as e:
         logger.warning(f"Failed to send trade email: {e}")
+
+
+def send_alert(subject: str, body: str) -> bool:
+    """Send a generic alert email. Returns True if sent, False if email not configured."""
+    if not _email_enabled():
+        return False
+    try:
+        msg = MIMEMultipart()
+        msg["From"]    = EMAIL_FROM
+        msg["To"]      = EMAIL_TO
+        msg["Subject"] = subject
+        msg.attach(MIMEText(body, "plain"))
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=15) as server:
+            server.ehlo()
+            server.starttls()
+            server.login(EMAIL_FROM, SMTP_PASS)
+            server.sendmail(EMAIL_FROM, EMAIL_TO, msg.as_string())
+        logger.info(f"Alert email sent: {subject}")
+        return True
+    except Exception as e:
+        logger.warning(f"Failed to send alert email: {e}")
+        return False
