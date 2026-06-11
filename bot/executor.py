@@ -392,12 +392,22 @@ class Executor:
 
         logger.info(f"Executing on {dex_used}: {amount_in_wei / 10**token_in_decimals:.6f} {token_in_symbol} -> {token_out_symbol}")
 
+        # Compute slippage once — used for both Aerodrome and Uniswap paths.
+        # Sells: 15% (must exit regardless of pool depth).
+        # Buys: 0.5% liquid pairs, 3% low-cap.
+        if is_sell:
+            _slip = 0.15
+        elif token_in_symbol in HIGH_LIQUIDITY_TOKENS and token_out_symbol in HIGH_LIQUIDITY_TOKENS:
+            _slip = SLIPPAGE_TOLERANCE
+        else:
+            _slip = SLIPPAGE_TOLERANCE_LOWCAP
+
         # Execute on the DEX that gave us a quote
         if dex_used == "aerodrome":
             tx_hash = self.aerodrome.swap(
                 token_in_address, token_out_address,
                 amount_in_wei, aerodrome_routes, amount_out,
-                slippage=0.15 if is_sell else None,
+                slippage=_slip,
             )
             if not tx_hash:
                 return None
@@ -406,15 +416,7 @@ class Executor:
             if not is_native_eth:
                 self._ensure_approval(token_in_address, amount_in_wei)
 
-            # Sells: use 15% slippage — we must exit regardless of pool depth.
-            # Buys: tight slippage (0.5% liquid, 3% low-cap) to protect entry quality.
-            if is_sell:
-                slip = 0.15
-            elif token_in_symbol in HIGH_LIQUIDITY_TOKENS and token_out_symbol in HIGH_LIQUIDITY_TOKENS:
-                slip = SLIPPAGE_TOLERANCE
-            else:
-                slip = SLIPPAGE_TOLERANCE_LOWCAP
-            min_out   = int(amount_out * (1 - slip))
+            min_out   = int(amount_out * (1 - _slip))
             deadline  = int(time.time()) + 300
             gas_price = self.w3.eth.gas_price
 

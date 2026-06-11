@@ -994,9 +994,10 @@ class TradingAgent:
                         token_out_price_usd=1.0,
                         exit_reasoning=f"Mechanical {ex['exit_type']}: {reason}",
                     )
-                    # Always raise TP after a take-profit triggers — even if the swap
-                    # failed — so a blocked exit doesn't re-trigger every tick.
-                    if ex["exit_type"] == "take_profit":
+                    # Raise TP only if the swap was submitted on-chain (tx is not None).
+                    # If executor blocked pre-chain (tx=None), keep TP unchanged so the
+                    # bot retries next tick — don't permanently strand the position.
+                    if ex["exit_type"] == "take_profit" and tx is not None:
                         positions.raise_take_profit(sym, ex.get("lot_id", ""), multiplier=1.5)
 
         # Signal-based exit suggestions for held positions (replaces time window)
