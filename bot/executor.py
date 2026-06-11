@@ -359,9 +359,12 @@ class Executor:
             amount_out_tokens = amount_out / (10 ** token_out_dec)
             amount_out_usd    = amount_out_tokens * token_out_price_usd
 
-            # Price impact check — buys only. Sells must be allowed through at any slippage;
-            # being permanently stuck in a position is worse than accepting DEX illiquidity.
-            # Dusting protection already handles sell-side security.
+            # Price impact checks:
+            # Buys: blocked above MAX_PRICE_IMPACT (5%).
+            # Sells: SL exits always go through (cutting losses — any price is better than stuck).
+            #        Discretionary exits (TP, AI) blocked above 30% — pool price too far from market.
+            #        This prevents selling a +24% position at a 54% DEX haircut into a thin pool.
+            is_forced_exit = "stop_loss" in (exit_reasoning or "").lower()
             if is_buy and amount_in_usd > 0:
                 price_impact = (amount_in_usd - amount_out_usd) / amount_in_usd
                 logger.info(f"Price impact: {price_impact:.1%} (in ${amount_in_usd:.2f} → out ${amount_out_usd:.2f})")
@@ -372,7 +375,18 @@ class Executor:
                     return None
             elif not is_buy and amount_in_usd > 0:
                 price_impact = (amount_in_usd - amount_out_usd) / amount_in_usd
-                logger.info(f"Sell price impact: {price_impact:.1%} (in ${amount_in_usd:.2f} → out ${amount_out_usd:.2f}) — allowing exit")
+                SELL_IMPACT_MAX = 0.30  # 30% for discretionary exits; ignored for forced SL
+                if price_impact > SELL_IMPACT_MAX and not is_forced_exit:
+                    msg = (
+                        f"Sell blocked: {price_impact:.1%} pool price impact exceeds {SELL_IMPACT_MAX:.0%} max. "
+                        f"Pool price is too far from market — holding is better than a {price_impact:.0%} haircut. "
+                        f"(Stop-loss exits bypass this check.)"
+                    )
+                    logger.warning(msg)
+                    _log_swap_block(token_in_symbol, token_out_symbol, amount_in_usd, msg)
+                    return None
+                label = " — forced SL exit" if is_forced_exit else ""
+                logger.info(f"Sell price impact: {price_impact:.1%} (in ${amount_in_usd:.2f} → out ${amount_out_usd:.2f}){label}")
 
             # Execution price check: compare on-chain implied price to CoinGecko reference.
             # Catches cases where DEX pool price is completely disconnected from market.
