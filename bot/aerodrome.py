@@ -177,11 +177,14 @@ class AerodromeRouter:
         amount_in_wei: int,
         routes: list[dict],
         amount_out: int,
+        slippage: float | None = None,
     ) -> str | None:
-        token_in_sym  = token_in.split("/")[-1] if "/" in token_in else token_in
-        token_out_sym = token_out.split("/")[-1] if "/" in token_out else token_out
-        slip = SLIPPAGE_TOLERANCE if (token_in_sym in HIGH_LIQUIDITY_TOKENS and token_out_sym in HIGH_LIQUIDITY_TOKENS) else SLIPPAGE_TOLERANCE_LOWCAP
-        slip = min(slip, SLIPPAGE_MAX)
+        # Caller passes slippage explicitly for sells (15%) vs buys (3%).
+        # Do NOT derive from token symbols here — token_in/out are addresses, not symbols.
+        if slippage is not None:
+            slip = slippage
+        else:
+            slip = min(SLIPPAGE_TOLERANCE_LOWCAP, SLIPPAGE_MAX)
         min_out   = int(amount_out * (1 - slip))
         deadline  = int(time.time()) + 300
         gas_price = self.w3.eth.gas_price

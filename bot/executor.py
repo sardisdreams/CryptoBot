@@ -397,6 +397,7 @@ class Executor:
             tx_hash = self.aerodrome.swap(
                 token_in_address, token_out_address,
                 amount_in_wei, aerodrome_routes, amount_out,
+                slippage=0.15 if is_sell else None,
             )
             if not tx_hash:
                 return None
@@ -405,9 +406,14 @@ class Executor:
             if not is_native_eth:
                 self._ensure_approval(token_in_address, amount_in_wei)
 
-            # Use tighter slippage for liquid tokens, wider for low-cap — capped at 5% max
-            slip = SLIPPAGE_TOLERANCE if (token_in_symbol in HIGH_LIQUIDITY_TOKENS and token_out_symbol in HIGH_LIQUIDITY_TOKENS) else SLIPPAGE_TOLERANCE_LOWCAP
-            slip = min(slip, SLIPPAGE_MAX)
+            # Sells: use 15% slippage — we must exit regardless of pool depth.
+            # Buys: tight slippage (0.5% liquid, 3% low-cap) to protect entry quality.
+            if is_sell:
+                slip = 0.15
+            elif token_in_symbol in HIGH_LIQUIDITY_TOKENS and token_out_symbol in HIGH_LIQUIDITY_TOKENS:
+                slip = SLIPPAGE_TOLERANCE
+            else:
+                slip = SLIPPAGE_TOLERANCE_LOWCAP
             min_out   = int(amount_out * (1 - slip))
             deadline  = int(time.time()) + 300
             gas_price = self.w3.eth.gas_price

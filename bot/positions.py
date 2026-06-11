@@ -301,11 +301,31 @@ def get_position_summary(current_prices: dict[str, float]) -> list[dict]:
             date_open = datetime.fromisoformat(lot["date_opened"])
             hold_days = (datetime.now(timezone.utc) - date_open).days
 
+            tp_price = lot.get("take_profit_price")
+            sl_price = lot.get("stop_loss_price")
+            entry    = lot["entry_price_usd"]
+            highest  = lot.get("highest_price_seen", entry)
+            is_trailing_stop = highest > entry * 1.001  # trailing stop raised at some point
+
+            # % distance from current price to TP/SL (positive = price needs to move that way)
+            tp_distance_pct = ((tp_price - current_price) / current_price * 100) if (tp_price and current_price > 0) else None
+            sl_distance_pct = ((current_price - sl_price) / current_price * 100) if (sl_price and current_price > 0) else None
+            sl_breached     = (sl_price and current_price > 0 and current_price < sl_price)
+            tp_hit          = (tp_price and current_price > 0 and current_price >= tp_price)
+
+            max_hold_until = lot.get("max_hold_until")
+            hold_expired   = False
+            if max_hold_until:
+                try:
+                    hold_expired = datetime.now(timezone.utc) > datetime.fromisoformat(max_hold_until)
+                except Exception:
+                    pass
+
             summary.append({
                 "id":                lot["id"],
                 "symbol":            symbol,
                 "date_opened":       lot["date_opened"],
-                "entry_price":       lot["entry_price_usd"],
+                "entry_price":       entry,
                 "amount_tokens":     lot["amount_tokens"],
                 "cost_basis_usd":    lot["cost_basis_usd"],
                 "current_price":     current_price,
@@ -313,11 +333,19 @@ def get_position_summary(current_prices: dict[str, float]) -> list[dict]:
                 "gain_loss_usd":     round(gain_loss, 4),
                 "gain_loss_pct":     round(gain_pct, 2),
                 "hold_days":         hold_days,
-                "take_profit_price": lot.get("take_profit_price"),
-                "stop_loss_price":   lot.get("stop_loss_price"),
+                "take_profit_price": tp_price,
+                "stop_loss_price":   sl_price,
                 "take_profit_pct":   lot.get("take_profit_pct", 25),
                 "stop_loss_pct":     lot.get("stop_loss_pct", 25),
                 "cg_id":             lot.get("cg_id", ""),
+                "is_trailing_stop":  is_trailing_stop,
+                "highest_price_seen": highest,
+                "tp_distance_pct":   round(tp_distance_pct, 1) if tp_distance_pct is not None else None,
+                "sl_distance_pct":   round(sl_distance_pct, 1) if sl_distance_pct is not None else None,
+                "sl_breached":       sl_breached,
+                "tp_hit":            tp_hit,
+                "max_hold_until":    max_hold_until,
+                "hold_expired":      hold_expired,
             })
 
     return summary

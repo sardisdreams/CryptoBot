@@ -343,61 +343,126 @@ HTML = """
   <div class="section" style="margin-top:16px">
     <h2>Open Positions — Detail</h2>
     {% if open_positions %}
-    <table class="positions-table">
-      <tr>
-        <th>Token</th><th>Amount</th><th>Entry</th><th>Current</th>
-        <th>Cost</th><th>Value</th><th>P&L $</th><th>P&L %</th>
-        <th>Take Profit</th><th>TP Profit</th><th>Stop Loss</th><th>SL Risk</th><th>Hold Days</th>
-      </tr>
-      {% for p in open_positions %}
-      <tr>
-        <td>
-          {% if p.cg_url %}<a href="{{ p.cg_url }}" target="_blank" class="cglink">{{ p.symbol }}</a>
-          {% else %}<strong>{{ p.symbol }}</strong>{% endif %}
-        </td>
-        <td>{{ "%.4f"|format(p.amount_tokens) }}</td>
-        <td>{% if p.entry_price > 0 %}${{ "%.6f"|format(p.entry_price) }}{% else %}<span class="tag-unk">unknown</span>{% endif %}</td>
-        <td>{% if p.current_price > 0 %}${{ "%.6f"|format(p.current_price) }}{% else %}<span class="tag-unk">pending</span>{% endif %}</td>
-        <td>{% if p.cost_basis_usd > 0 %}${{ "%.2f"|format(p.cost_basis_usd) }}{% else %}—{% endif %}</td>
-        <td class="{{ 'pos' if p.current_value >= p.cost_basis_usd else 'neg' }}">{% if p.current_value > 0 %}${{ "%.2f"|format(p.current_value) }}{% else %}—{% endif %}</td>
-        <td class="{{ 'pos' if p.gain_loss_usd >= 0 else 'neg' }}">
-          {% if p.cost_basis_usd > 0 %}${{ "%+.2f"|format(p.gain_loss_usd) }}{% else %}—{% endif %}
-        </td>
-        <td class="{{ 'pos' if p.gain_loss_pct > 0 else 'neg' }}">
-          {% if p.cost_basis_usd > 0 %}{{ "%+.2f"|format(p.gain_loss_pct) }}%{% else %}—{% endif %}
-        </td>
-        <td class="tag-tp">{% if p.take_profit_price %}${{ "%.6f"|format(p.take_profit_price) }}<br>(+{{ p.take_profit_pct }}%){% else %}—{% endif %}</td>
-        <td>
-          {% if p.take_profit_price and p.entry_price > 0 and p.cost_basis_usd > 0 %}
-            {% set tp_profit = p.cost_basis_usd * p.take_profit_pct / 100 %}
-            {% set progress = [(p.current_price - p.entry_price) / (p.take_profit_price - p.entry_price) * 100, 0] | max %}
-            {% set progress = [progress, 100] | min %}
-            <span class="pos" style="font-size:0.8rem;font-weight:700;">+${{ "%.2f"|format(tp_profit) }}</span><br>
-            <div style="margin-top:4px;background:#22c55e22;border-radius:4px;height:6px;width:80px;">
-              <div style="background:#22c55e;height:6px;border-radius:4px;width:{{ "%.0f"|format(progress) }}%;"></div>
-            </div>
-            <span class="pos" style="font-size:0.65rem;">{{ "%.0f"|format(progress) }}%</span>
-          {% else %}—{% endif %}
-        </td>
-        <td class="tag-sl">{% if p.stop_loss_price %}${{ "%.6f"|format(p.stop_loss_price) }}<br>(-{{ p.stop_loss_pct }}%){% else %}—{% endif %}</td>
-        <td>
-          {% if p.stop_loss_price and p.entry_price > 0 and p.cost_basis_usd > 0 %}
-            {% set sl_risk = p.cost_basis_usd * p.stop_loss_pct / 100 %}
-            {% set sl_progress = [(p.entry_price - p.current_price) / (p.entry_price - p.stop_loss_price) * 100, 0] | max %}
-            {% set sl_progress = [sl_progress, 100] | min %}
-            <span class="neg" style="font-size:0.8rem;font-weight:700;">-${{ "%.2f"|format(sl_risk) }}</span><br>
-            <div style="margin-top:4px;background:#ef444422;border-radius:4px;height:6px;width:80px;">
-              <div style="background:#ef4444;height:6px;border-radius:4px;width:{{ "%.0f"|format(sl_progress) }}%;"></div>
-            </div>
-            <span class="neg" style="font-size:0.65rem;">{{ "%.0f"|format(sl_progress) }}%</span>
-          {% else %}—{% endif %}
-        </td>
-        <td {% if p.hold_days >= 7 %}class="warn"{% endif %}>
-          {{ p.hold_days }}d
-        </td>
-      </tr>
-      {% endfor %}
-    </table>
+    <div style="display:flex;flex-direction:column;gap:14px;">
+    {% for p in open_positions %}
+    {% set is_up = p.gain_loss_pct >= 0 %}
+    {% set sl_ok = p.stop_loss_price and p.current_price > 0 and not p.sl_breached %}
+    {% if p.take_profit_price and p.entry_price > 0 and (p.take_profit_price - p.entry_price) > 0 %}
+      {% set tp_progress = [(p.current_price - p.entry_price) / (p.take_profit_price - p.entry_price) * 100, 0] | max %}
+      {% set tp_progress = [tp_progress, 100] | min %}
+    {% else %}
+      {% set tp_progress = 0 %}
+    {% endif %}
+    <div style="border:1px solid #334155;border-radius:10px;overflow:hidden;background:#0f172a;">
+
+      <!-- Header row -->
+      <div style="display:flex;align-items:center;gap:10px;padding:12px 16px;background:#1e293b;border-bottom:1px solid #334155;flex-wrap:wrap;">
+        <div style="font-size:1.1rem;font-weight:800;letter-spacing:0.04em;">
+          {% if p.cg_url %}<a href="{{ p.cg_url }}" target="_blank" style="color:#f8fafc;text-decoration:none;">{{ p.symbol }}</a>
+          {% else %}{{ p.symbol }}{% endif %}
+        </div>
+        <div style="font-size:1.1rem;font-weight:700;color:{{ '#22c55e' if is_up else '#ef4444' }};">
+          {{ "%+.2f"|format(p.gain_loss_pct) }}%
+          <span style="font-size:0.85rem;font-weight:500;opacity:0.8;">&nbsp;(${{ "%+.2f"|format(p.gain_loss_usd) }})</span>
+        </div>
+        <div style="flex:1"></div>
+        {% if p.sl_breached %}<span style="background:#7f1d1d;color:#fca5a5;font-size:0.7rem;font-weight:700;padding:2px 8px;border-radius:4px;letter-spacing:0.05em;">SL BREACHED — SELLING</span>{% endif %}
+        {% if p.tp_hit %}<span style="background:#14532d;color:#86efac;font-size:0.7rem;font-weight:700;padding:2px 8px;border-radius:4px;letter-spacing:0.05em;">TP HIT — SELLING</span>{% endif %}
+        {% if p.hold_expired %}<span style="background:#431407;color:#fdba74;font-size:0.7rem;font-weight:700;padding:2px 8px;border-radius:4px;letter-spacing:0.05em;">HOLD EXPIRED</span>{% endif %}
+        {% if p.is_trailing_stop %}<span style="background:#1e3a5f;color:#7dd3fc;font-size:0.7rem;font-weight:600;padding:2px 8px;border-radius:4px;">TRAILING STOP ↑</span>{% endif %}
+        <div style="color:#94a3b8;font-size:0.78rem;">{{ p.hold_days }}d held &nbsp;·&nbsp; {{ p.date_opened | to_est_date }}</div>
+      </div>
+
+      <!-- Body -->
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0;border-bottom:1px solid #1e293b;">
+
+        <!-- Price column -->
+        <div style="padding:14px 16px;border-right:1px solid #1e293b;">
+          <div style="color:#64748b;font-size:0.7rem;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:6px;">Price</div>
+          <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:4px;">
+            <span style="font-size:0.72rem;color:#64748b;">Entry</span>
+            <span style="font-size:0.9rem;color:#e2e8f0;">${{ "%.6f"|format(p.entry_price) }}</span>
+          </div>
+          <div style="display:flex;align-items:baseline;gap:8px;">
+            <span style="font-size:0.72rem;color:#64748b;">Now</span>
+            <span style="font-size:1.05rem;font-weight:700;color:{{ '#22c55e' if is_up else '#ef4444' }};">
+              {% if p.current_price > 0 %}${{ "%.6f"|format(p.current_price) }}{% else %}<span style="color:#64748b">—</span>{% endif %}
+            </span>
+          </div>
+          {% if p.is_trailing_stop and p.highest_price_seen %}
+          <div style="margin-top:6px;font-size:0.7rem;color:#7dd3fc;">Peak: ${{ "%.6f"|format(p.highest_price_seen) }}</div>
+          {% endif %}
+        </div>
+
+        <!-- Take Profit column -->
+        <div style="padding:14px 16px;border-right:1px solid #1e293b;">
+          <div style="color:#64748b;font-size:0.7rem;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:6px;">Take Profit</div>
+          {% if p.take_profit_price %}
+          <div style="font-size:0.95rem;font-weight:700;color:#22c55e;">${{ "%.6f"|format(p.take_profit_price) }}</div>
+          <div style="font-size:0.75rem;color:#64748b;margin-top:2px;">+{{ "%.1f"|format(p.take_profit_pct) }}% from entry</div>
+          {% if p.tp_distance_pct is not none %}
+            {% if p.tp_distance_pct <= 0 %}
+            <div style="margin-top:6px;font-size:0.75rem;color:#86efac;font-weight:700;">✓ TARGET HIT</div>
+            {% else %}
+            <div style="margin-top:6px;font-size:0.75rem;color:#94a3b8;">+{{ "%.1f"|format(p.tp_distance_pct) }}% still needed</div>
+            {% endif %}
+          {% endif %}
+          <!-- Progress bar: entry → TP -->
+          <div style="margin-top:8px;background:#22c55e22;border-radius:4px;height:5px;width:100%;">
+            <div style="background:#22c55e;height:5px;border-radius:4px;width:{{ "%.0f"|format(tp_progress) }}%;transition:width 0.3s;"></div>
+          </div>
+          <div style="font-size:0.65rem;color:#64748b;margin-top:3px;">{{ "%.0f"|format(tp_progress) }}% to target</div>
+          {% else %}<div style="color:#475569;">Not set</div>{% endif %}
+        </div>
+
+        <!-- Stop Loss column -->
+        <div style="padding:14px 16px;">
+          <div style="color:#64748b;font-size:0.7rem;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:6px;">
+            Stop Loss{% if p.is_trailing_stop %} <span style="color:#7dd3fc;">(trailing)</span>{% endif %}
+          </div>
+          {% if p.stop_loss_price %}
+          <div style="font-size:0.95rem;font-weight:700;color:{{ '#fca5a5' if p.sl_breached else '#ef4444' }};">${{ "%.6f"|format(p.stop_loss_price) }}</div>
+          <div style="font-size:0.75rem;color:#64748b;margin-top:2px;">
+            {% if p.is_trailing_stop %}{{ "%.1f"|format(p.stop_loss_pct) }}% trail below peak{% else %}-{{ "%.1f"|format(p.stop_loss_pct) }}% from entry{% endif %}
+          </div>
+          {% if p.sl_breached %}
+          <div style="margin-top:6px;font-size:0.75rem;color:#fca5a5;font-weight:700;">
+            ⚠ BREACHED — {{ "%.1f"|format(((p.stop_loss_price - p.current_price) / p.stop_loss_price * 100)|abs) }}% below SL
+          </div>
+          {% elif p.sl_distance_pct is not none %}
+          <div style="margin-top:6px;font-size:0.75rem;color:#94a3b8;">{{ "%.1f"|format(p.sl_distance_pct) }}% buffer above SL</div>
+          {% endif %}
+          <!-- SL proximity bar — fills red as price approaches SL -->
+          {% if p.current_price > 0 and p.entry_price > 0 and p.stop_loss_price > 0 %}
+            {% if not p.sl_breached %}
+              {% set sl_prox = [(p.entry_price - p.current_price) / (p.entry_price - p.stop_loss_price) * 100, 0] | max %}
+              {% set sl_prox = [sl_prox, 100] | min %}
+              <div style="margin-top:8px;background:#ef444422;border-radius:4px;height:5px;width:100%;">
+                <div style="background:#ef4444;height:5px;border-radius:4px;width:{{ "%.0f"|format(sl_prox) }}%;"></div>
+              </div>
+              <div style="font-size:0.65rem;color:#64748b;margin-top:3px;">{{ "%.0f"|format(sl_prox) }}% of way to SL</div>
+            {% else %}
+              <div style="margin-top:8px;background:#ef4444;border-radius:4px;height:5px;width:100%;"></div>
+            {% endif %}
+          {% endif %}
+          {% else %}<div style="color:#475569;">Not set</div>{% endif %}
+        </div>
+      </div>
+
+      <!-- Footer: size summary -->
+      <div style="padding:10px 16px;display:flex;gap:24px;flex-wrap:wrap;font-size:0.78rem;color:#94a3b8;">
+        <span><span style="color:#64748b;">Amount:</span> {{ "%.4f"|format(p.amount_tokens) }} {{ p.symbol }}</span>
+        <span><span style="color:#64748b;">Cost:</span> ${{ "%.2f"|format(p.cost_basis_usd) }}</span>
+        <span><span style="color:#64748b;">Value:</span> <span style="color:{{ '#22c55e' if p.current_value >= p.cost_basis_usd else '#ef4444' }};">${{ "%.2f"|format(p.current_value) }}</span></span>
+        {% if p.hold_expired and p.max_hold_until %}
+        <span style="color:#fb923c;"><span style="color:#64748b;">Max hold:</span> EXPIRED ({{ p.max_hold_until | to_est_date }})</span>
+        {% elif p.max_hold_until %}
+        <span><span style="color:#64748b;">Sell by:</span> {{ p.max_hold_until | to_est_date }}</span>
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
+    </div>
     {% else %}
     <div class="empty">No open positions</div>
     {% endif %}
