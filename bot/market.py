@@ -133,7 +133,11 @@ class Market:
 
     def get_all_prices(self) -> dict[str, float]:
         data = self.get_market_data()
-        return {sym: d["price"] for sym, d in data.items()} if data else {sym: 0.0 for sym in TOKENS}
+        prices = {sym: d["price"] for sym, d in data.items()} if data else {sym: 0.0 for sym in TOKENS}
+        # Stablecoins are always $1 — API rate limits must never zero them out
+        for sym in STABLECOINS:
+            prices[sym] = 1.0
+        return prices
 
     def get_price_usd(self, symbol: str) -> float:
         return self.get_all_prices().get(symbol.upper(), 0.0)
