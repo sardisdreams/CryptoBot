@@ -812,10 +812,14 @@ class TradingAgent:
         amount_tokens = amount_usd / price_in
         amount_wei = int(amount_tokens * (10 ** token_in["decimals"]))
 
-        # Check available balance
+        # Check available balance.
+        # Buys: cap at 98% of holdings to prevent rounding over-spend.
+        # Sells: allow up to 105% of recorded value — price ticks between valuation
+        # and execution, and full-position sells must always be allowed through.
         holding = snapshot["holdings"].get(token_in_sym, {})
         available_usd = holding.get("value_usd", 0)
-        if amount_usd > available_usd * 0.98:
+        limit = available_usd * 1.05 if is_buy is False else available_usd * 0.98
+        if amount_usd > limit:
             msg = f"Insufficient balance: have ${available_usd:.2f} of {token_in_sym}, need ${amount_usd:.2f}"
             _log_trade_block(token_in_sym, token_out_sym, amount_usd, msg)
             return msg
