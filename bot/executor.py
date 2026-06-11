@@ -287,10 +287,30 @@ class Executor:
 
         _amt_usd_approx = (amount_in_wei / 10 ** token_in_decimals) * (token_in_price_usd or 1)
 
+        is_sell = token_in_symbol not in STABLECOINS and token_out_symbol in STABLECOINS
+
+        # For sells: cap amount_in_wei at the actual on-chain balance.
+        # Storing amount_tokens as a Python float then re-multiplying by 10**decimals can
+        # produce a value 100–200 wei LARGER than the real balance due to float precision loss.
+        # That difference is enough to make every transferFrom revert with "no data".
+        if is_sell:
+            try:
+                _token_contract = self.w3.eth.contract(
+                    address=self.w3.to_checksum_address(token_in_address), abi=ERC20_ABI
+                )
+                _on_chain_bal = _token_contract.functions.balanceOf(self.wallet.address).call()
+                if _on_chain_bal < amount_in_wei:
+                    logger.info(
+                        f"Capping {token_in_symbol} sell from {amount_in_wei} to {_on_chain_bal} "
+                        f"(float precision diff: {amount_in_wei - _on_chain_bal} wei)"
+                    )
+                    amount_in_wei = _on_chain_bal
+            except Exception as _e:
+                logger.warning(f"Could not fetch on-chain balance for {token_in_symbol}: {_e}")
+
         # Dusting attack protection: refuse to sell any token the bot never bought.
         # Malicious tokens are sometimes airdropped to wallets — interacting with them
         # (calling approve or transferring) can drain the wallet via malicious contracts.
-        is_sell = token_in_symbol not in STABLECOINS and token_out_symbol in STABLECOINS
         if is_sell and token_in_symbol not in {"WETH", "cbBTC", "cbETH"}:
             open_pos = positions.get_open_positions()
             if token_in_symbol not in open_pos:
