@@ -182,6 +182,7 @@ HTML = """
   <div class="tab" onclick="showTab('analytics')">Analytics</div>
   <div class="tab" onclick="showTab('knowledge')">Knowledge Base</div>
   <div class="tab" onclick="showTab('airdrops')">Airdrops{% if airdrop_tokens %} <span style="background:#f59e0b;color:#000;border-radius:8px;padding:1px 6px;font-size:0.65rem;margin-left:4px">{{ airdrop_tokens|length }}</span>{% endif %}</div>
+  <div class="tab" onclick="showTab('dust')">Dust{% if dust_tokens %} <span style="background:#475569;color:#e2e8f0;border-radius:8px;padding:1px 6px;font-size:0.65rem;margin-left:4px">{{ dust_tokens|length }}</span>{% endif %}</div>
 </div>
 
 <!-- TAB: PORTFOLIO -->
@@ -308,7 +309,11 @@ HTML = """
     {% set all_wallet = [] %}
     {% for sym, b in stats.balances.items() %}
       {% if b.balance > 0.000001 and sym not in airdrop_syms %}
-        {% set _ = all_wallet.append({'symbol': sym, 'balance': b.balance, 'value_usd': b.value_usd, 'price': b.price, 'is_gas': b.is_gas, 'managed': sym in pos_syms, 'address': '', 'cg_id': '', 'source': 'wallet'}) %}
+        {% set is_stable = sym in ('USDC', 'USDT', 'DAI') %}
+        {% set is_meaningful = b.value_usd >= 5 or b.is_gas or is_stable %}
+        {% if is_meaningful %}
+          {% set _ = all_wallet.append({'symbol': sym, 'balance': b.balance, 'value_usd': b.value_usd, 'price': b.price, 'is_gas': b.is_gas, 'managed': sym in pos_syms, 'address': '', 'cg_id': '', 'source': 'wallet'}) %}
+        {% endif %}
       {% endif %}
     {% endfor %}
     {% if all_wallet %}
@@ -468,26 +473,31 @@ HTML = """
     {% endif %}
   </div>
 
-  <!-- Recent Issues -->
-  <div class="row-label" style="margin-top:24px">Recent Issues</div>
+  <!-- Recent Transactions -->
+  <div class="row-label" style="margin-top:24px">Recent Activity</div>
   <div class="section" style="margin-top:8px">
-    <h2>Trade Failures &amp; Blocks</h2>
+    <h2>Last 20 Transactions</h2>
     {% if recent_issues %}
+    <div style="max-height:420px;overflow-y:auto;">
     <table>
-      <tr><th>Time</th><th>Direction</th><th>Amount</th><th>Type</th><th>Reason</th><th>Tx</th></tr>
+      <tr><th>Time</th><th>Direction</th><th>Amount</th><th>Status</th><th>Detail</th><th>Tx</th></tr>
       {% for issue in recent_issues %}
       <tr>
         <td style="color:#64748b;font-size:0.73rem;white-space:nowrap">{{ issue.ts | to_est }}</td>
         <td>{{ issue.token_in }} → {{ issue.token_out }}</td>
         <td>${{ "%.2f"|format(issue.amount_usd|float) }}</td>
         <td>
-          {% if issue.type == "blocked" %}
+          {% if issue.type == "success" %}
+          <span class="pill active" style="font-size:0.68rem">success</span>
+          {% elif issue.type == "blocked" %}
           <span class="pill failed" style="font-size:0.68rem">blocked</span>
+          {% elif issue.type == "pending" %}
+          <span class="pill" style="font-size:0.68rem;background:#78350f;color:#fde68a">pending</span>
           {% else %}
-          <span class="pill failed" style="font-size:0.68rem">swap failed</span>
+          <span class="pill failed" style="font-size:0.68rem">failed</span>
           {% endif %}
         </td>
-        <td style="color:#94a3b8;font-size:0.78rem;max-width:340px">{{ issue.reason }}</td>
+        <td style="color:#94a3b8;font-size:0.78rem;max-width:300px">{{ issue.reason }}</td>
         <td>
           {% if issue.tx_hash %}
           <a href="https://basescan.org/tx/{{ issue.tx_hash }}" target="_blank" class="hash">{{ issue.tx_hash[:10] }}...</a>
@@ -496,8 +506,9 @@ HTML = """
       </tr>
       {% endfor %}
     </table>
+    </div>
     {% else %}
-    <div class="empty">No recent issues</div>
+    <div class="empty">No recent transactions</div>
     {% endif %}
   </div>
 
@@ -744,6 +755,38 @@ HTML = """
   </div>
 </div>
 </div><!-- end tab-airdrops -->
+
+<!-- TAB: DUST -->
+<div id="tab-dust" class="tab-content">
+<div class="container">
+  <div class="section" style="margin-top:16px">
+    <h2>Dust — Small Balances</h2>
+    <p style="color:#64748b;font-size:0.78rem;margin-bottom:12px">
+      Tokens with value under $5. Not actively traded or managed by the bot.
+    </p>
+    {% if dust_tokens %}
+    <table>
+      <tr><th>Token</th><th>Balance</th><th>Price</th><th>Value</th><th>Contract</th></tr>
+      {% for t in dust_tokens %}
+      <tr>
+        <td>
+          {% if t.address %}<a href="https://basescan.org/token/{{ t.address }}" target="_blank" class="cglink">{{ t.symbol }}</a>
+          {% else %}{{ t.symbol }}{% endif %}
+          {% if t.name %}<span style="color:#475569;font-size:0.7rem;display:block">{{ t.name }}</span>{% endif %}
+        </td>
+        <td>{{ "%.6f"|format(t.balance|float) }}</td>
+        <td>{% if t.price %}<span style="color:#94a3b8">${{ "%.8f"|format(t.price|float) }}</span>{% else %}<span style="color:#475569">unknown</span>{% endif %}</td>
+        <td style="color:#94a3b8">${{ "%.4f"|format(t.value_usd|float) }}</td>
+        <td>{% if t.address %}<a href="https://basescan.org/token/{{ t.address }}" target="_blank" class="hash">{{ t.address[:10] }}...{{ t.address[-6:] }}</a>{% else %}—{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% else %}
+    <div class="empty">No dust tokens — wallet is clean</div>
+    {% endif %}
+  </div>
+</div>
+</div><!-- end tab-dust -->
 
 <script>
 function showTab(name) {
@@ -1028,12 +1071,12 @@ def _get_airdrop_tokens(w3, wallet_address: str, open_pos: list[dict], prices: d
     return [a for a in airdrops if a["value_usd"] >= 5.0]
 
 
-def _get_recent_issues(n: int = 30) -> list[dict]:
+def _get_recent_issues(n: int = 20) -> list[dict]:
     """
-    Return the most recent trade failures and agent-level blocks, combined and
+    Return the most recent trade activity — all transactions plus agent-level blocks,
     sorted newest-first. Sources:
       - data/trade_blocks.json  — agent rejected the trade before it reached the executor
-      - records/transactions.csv — on-chain swap attempts that returned status != success
+      - records/transactions.csv — all on-chain swap attempts (any status)
     """
     issues = []
 
@@ -1054,22 +1097,31 @@ def _get_recent_issues(n: int = 30) -> list[dict]:
         except Exception:
             pass
 
-    # On-chain failures
+    # All on-chain swap attempts
     txns_file = "records/transactions.csv"
     if os.path.exists(txns_file):
         try:
             with open(txns_file, newline="") as f:
                 for row in csv.DictReader(f):
-                    if row.get("status", "").lower() not in ("success", ""):
-                        issues.append({
-                            "ts":         row.get("date_utc", ""),
-                            "type":       "swap_failed",
-                            "token_in":   row.get("token_in", "?"),
-                            "token_out":  row.get("token_out", "?"),
-                            "amount_usd": row.get("amount_in", 0),
-                            "reason":     f"On-chain swap failed (status: {row.get('status','?')})",
-                            "tx_hash":    row.get("tx_hash", ""),
-                        })
+                    status = row.get("status", "").lower()
+                    if status == "success":
+                        tx_type = "success"
+                        reason  = ""
+                    elif status in ("failed", "unknown"):
+                        tx_type = "swap_failed"
+                        reason  = f"On-chain swap {status}"
+                    else:
+                        tx_type = "pending"
+                        reason  = "Pending confirmation"
+                    issues.append({
+                        "ts":         row.get("date_utc", ""),
+                        "type":       tx_type,
+                        "token_in":   row.get("token_in", "?"),
+                        "token_out":  row.get("token_out", "?"),
+                        "amount_usd": row.get("amount_in", 0),
+                        "reason":     reason,
+                        "tx_hash":    row.get("tx_hash", ""),
+                    })
         except Exception:
             pass
 
@@ -1344,6 +1396,31 @@ def index():
 
     airdrop_tokens = _get_airdrop_tokens(w3, wallet_address, open_pos, prices)
 
+    # Dust: wallet balances under $5, excluding gas ETH and stablecoins
+    _STABLES = {"USDC", "USDT", "DAI"}
+    dust_tokens = []
+    for sym, b in balances.items():
+        if sym.startswith("_"):
+            continue
+        if b.get("is_gas") or sym in _STABLES:
+            continue
+        if b.get("balance", 0) <= 1e-9:
+            continue
+        if b.get("value_usd", 0) < 5:
+            dust_tokens.append({
+                "symbol":    sym,
+                "balance":   b.get("balance", 0),
+                "price":     b.get("price", 0),
+                "value_usd": b.get("value_usd", 0),
+                "address":   "",
+                "name":      "",
+            })
+    # Also include airdrop tokens under $5
+    for t in airdrop_tokens:
+        if (t.get("value_usd") or 0) < 5:
+            dust_tokens.append(t)
+    dust_tokens.sort(key=lambda t: t.get("value_usd") or 0, reverse=True)
+
     return render_template_string(
         HTML,
         stats=stats,
@@ -1359,7 +1436,8 @@ def index():
         loc=_count_lines_of_code(),
         last_refreshed=last_refreshed,
         recent_issues=_get_recent_issues(),
-        airdrop_tokens=airdrop_tokens,
+        airdrop_tokens=[t for t in airdrop_tokens if (t.get("value_usd") or 0) >= 5],
+        dust_tokens=dust_tokens,
     )
 
 
