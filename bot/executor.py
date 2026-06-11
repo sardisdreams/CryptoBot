@@ -337,8 +337,10 @@ class Executor:
             amount_out_tokens = amount_out / (10 ** token_out_dec)
             amount_out_usd    = amount_out_tokens * token_out_price_usd
 
-            # Standard price impact: are we getting fair value out?
-            if amount_in_usd > 0:
+            # Price impact check — buys only. Sells must be allowed through at any slippage;
+            # being permanently stuck in a position is worse than accepting DEX illiquidity.
+            # Dusting protection already handles sell-side security.
+            if is_buy and amount_in_usd > 0:
                 price_impact = (amount_in_usd - amount_out_usd) / amount_in_usd
                 logger.info(f"Price impact: {price_impact:.1%} (in ${amount_in_usd:.2f} → out ${amount_out_usd:.2f})")
                 if price_impact > MAX_PRICE_IMPACT:
@@ -346,6 +348,9 @@ class Executor:
                     logger.warning(msg)
                     _log_swap_block(token_in_symbol, token_out_symbol, amount_in_usd, msg)
                     return None
+            elif not is_buy and amount_in_usd > 0:
+                price_impact = (amount_in_usd - amount_out_usd) / amount_in_usd
+                logger.info(f"Sell price impact: {price_impact:.1%} (in ${amount_in_usd:.2f} → out ${amount_out_usd:.2f}) — allowing exit")
 
             # Execution price check: compare on-chain implied price to CoinGecko reference.
             # Catches cases where DEX pool price is completely disconnected from market.
@@ -360,8 +365,9 @@ class Executor:
                     _log_swap_block(token_in_symbol, token_out_symbol, amount_in_usd, msg)
                     return None
 
-        # Gas cost check — skip trade if gas > 2% of trade size
-        if token_in_price_usd > 0:
+        # Gas cost check — only block buys if gas > 2% of trade size.
+        # Never block sells on gas: being stuck in a position costs more than gas.
+        if is_buy and token_in_price_usd > 0:
             current_gas_price = self.w3.eth.gas_price
             gas_cost_eth = (GAS_LIMIT * current_gas_price) / 1e18
             eth_price = token_in_price_usd if token_in_symbol == "WETH" else token_out_price_usd if token_out_symbol == "WETH" else price_eth_usd
