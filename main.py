@@ -295,9 +295,23 @@ def main():
         _alert_file = "data/credit_alert.json"
         if os.path.exists(_alert_file):
             os.remove(_alert_file)
+
+        # Adaptive interval: if a near-miss opportunity exists (score ≥ 45 but below entry
+        # threshold), check back in 30min even if the tier normally waits longer.
+        # This lets the bot catch setups that need just one more confirming candle.
+        OPPORTUNITY_INTERVAL = 1800  # 30 minutes
+        OPPORTUNITY_THRESHOLD = 45
+        next_interval = tier["interval_seconds"]
+        best_score = getattr(agent, "last_best_signal_score", 0)
+        if best_score >= OPPORTUNITY_THRESHOLD and next_interval > OPPORTUNITY_INTERVAL:
+            next_interval = OPPORTUNITY_INTERVAL
+            logger.info(
+                f"Near-miss opportunity (score {best_score}/100) — shortening next tick to 30min"
+            )
+
         schedule.clear()
-        schedule.every(tier["interval_seconds"]).seconds.do(run_and_reschedule)
-        logger.info(f"Next tick in {tier['interval_seconds']//60}min (tier: {tier['label']})")
+        schedule.every(next_interval).seconds.do(run_and_reschedule)
+        logger.info(f"Next tick in {next_interval//60}min (tier: {tier['label']})")
 
     # First run immediately
     tier = get_tier(Market().get_all_prices())

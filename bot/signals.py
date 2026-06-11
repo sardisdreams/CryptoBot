@@ -16,7 +16,7 @@ from bot.logger import setup_logger
 
 logger = setup_logger("signals")
 
-MIN_ENTRY_SCORE = 60
+MIN_ENTRY_SCORE = 55
 ATR_STOP_MULT   = 1.5   # stop  = entry - 1.5 × ATR
 ATR_TARGET_MULT = 3.0   # target = entry + 3.0 × ATR  (2:1 R/R minimum)
 

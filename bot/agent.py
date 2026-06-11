@@ -310,6 +310,7 @@ class TradingAgent:
         self.portfolio    = portfolio
         self.executor     = executor
         self.current_tier = {"sonnet_threshold": 5.0, "always_sonnet": False, "label": "CONSERVE"}
+        self.last_best_signal_score = 0  # set after each tick for adaptive interval
         self.client = anthropic.Anthropic(
             api_key=ANTHROPIC_API_KEY,
             http_client=httpx.Client(verify=certifi.where()),
@@ -598,6 +599,7 @@ class TradingAgent:
             top_by_vol = sorted(base_coins, key=lambda c: c.get("volume_24h", 0), reverse=True)[:8]
             scored     = _score_candidates(top_by_vol, regime["regime"])
             passing    = [s for s in scored if s["signal"]["entry_ok"]]
+            self.last_best_signal_score = scored[0]["signal"]["score"] if scored else 0
 
             if passing:
                 lines += ["", "== SIGNAL-FILTERED OPPORTUNITIES (score ≥ 60/100) ==",
@@ -615,8 +617,9 @@ class TradingAgent:
                     for cond in sig.get("conditions", []):
                         lines.append(f"    {cond}")
             else:
-                lines += ["", "Signal filter: no candidates scored ≥ 60 this tick — do not force entries.",
-                          f"(Scored {len(scored)} candidates, best score: {scored[0]['signal']['score'] if scored else 0}/100)"]
+                best_score = scored[0]["signal"]["score"] if scored else 0
+                lines += ["", f"Signal filter: no candidates scored ≥ 55 this tick — do not force entries.",
+                          f"(Scored {len(scored)} candidates, best score: {best_score}/100)"]
 
         # Wiki only for tokens currently held (not entire registry)
         held_symbols = [sym for sym, h in snapshot.get("holdings", {}).items() if h.get("balance", 0) > 0.000001 and sym not in {"USDC","USDT","DAI","ETH"}]
