@@ -345,7 +345,7 @@ class TradingAgent:
             f"Performance tier: {tier.get('label','?')} | Total P&L: ${tier.get('total_pnl',0):+.2f}",
             f"Capital floor: ${cap_summary['floor']:.2f} (base ${cap_summary['base_floor']:.0f} + ${cap_summary['locked_profit']:.2f} locked profit) | Withdrawable: ${cap_summary['withdrawable']:.2f}",
             f"Deployment: ${currently_deployed:.2f} deployed | Max deploy: ${dyn_max_deploy:.2f} (everything above floor) | Available: ${max(0, dyn_max_deploy - currently_deployed):.2f}",
-            f"Trade size: ${dyn_min_trade:.0f}–${dyn_max_trade:.0f} per trade (5–10% of portfolio)",
+            f"Trade size: ${dyn_min_trade:.0f}–${dyn_max_trade:.0f} for NEW buys only (5–10% of portfolio). NO minimum on sells — always exit a position regardless of size.",
             f"Recovery mode: {'YES — USDC below floor, no new trades' if in_recovery else 'No — trading permitted'}",
             f"",
             f"== MARKET REGIME: {regime['regime']} (score {regime['score']:+d}) ==",
