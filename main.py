@@ -161,6 +161,109 @@ def _record_tick():
         json.dump({"ts": datetime.now(timezone.utc).isoformat()}, f)
 
 
+def _verify_unknown_sells(w3):
+    """
+    Re-check any sell transactions that timed out waiting for a receipt.
+    If the tx succeeded on-chain, close the position and record the realized gain.
+    Runs every startup so no successful sell ever leaves a ghost position.
+    """
+    import csv as _csv
+    from bot import positions as _pos, capital as _cap
+
+    tx_file = "records/transactions.csv"
+    if not os.path.exists(tx_file):
+        return
+
+    with open(tx_file, newline="") as f:
+        rows = list(_csv.DictReader(f))
+
+    STABLECOINS = {"USDC", "USDT", "DAI"}
+    USDC_ADDR = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
+    TRANSFER_SIG = "ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
+
+    from eth_account import Account
+    from bot.config import PRIVATE_KEY
+    wallet_addr = Account.from_key(PRIVATE_KEY).address
+
+    changed = False
+    for row in rows:
+        if row.get("status") != "unknown":
+            continue
+        token_in  = row.get("token_in", "")
+        token_out = row.get("token_out", "")
+        tx_hash   = row.get("tx_hash", "")
+        if not tx_hash or token_in.upper() in STABLECOINS or token_out.upper() not in STABLECOINS:
+            continue
+
+        try:
+            full_hash = tx_hash if tx_hash.startswith("0x") else "0x" + tx_hash
+            receipt   = w3.eth.get_transaction_receipt(full_hash)
+        except Exception as e:
+            logger.warning(f"verify_unknown_sells: receipt lookup failed for {tx_hash[:12]}: {e}")
+            continue
+
+        if receipt is None:
+            continue
+
+        new_status = "success" if receipt["status"] == 1 else "failed"
+        row["status"]   = new_status
+        row["gas_used"] = str(receipt["gasUsed"])
+        changed = True
+        logger.info(f"verify_unknown_sells: tx {tx_hash[:12]} confirmed {new_status}")
+
+        if receipt["status"] != 1:
+            continue
+
+        # Decode actual USDC received from Transfer events
+        usdc_received = 0.0
+        for log in receipt["logs"]:
+            if (log["address"].lower() == USDC_ADDR.lower()
+                    and len(log["topics"]) >= 3
+                    and log["topics"][0].hex() == TRANSFER_SIG):
+                to_addr = "0x" + log["topics"][2].hex()[-40:]
+                if to_addr.lower() == wallet_addr.lower():
+                    usdc_received = int(log["data"].hex(), 16) / 1e6
+
+        try:
+            amount_in_tokens = float(row.get("amount_in", 0))
+        except ValueError:
+            logger.warning(f"verify_unknown_sells: bad amount_in in {tx_hash[:12]}")
+            continue
+
+        if amount_in_tokens <= 0 or usdc_received <= 0:
+            logger.warning(f"verify_unknown_sells: cannot compute exit price for {tx_hash[:12]}")
+            continue
+
+        exit_price = usdc_received / amount_in_tokens
+        try:
+            realized = _pos.close_position(
+                symbol=token_in,
+                amount_tokens=amount_in_tokens,
+                exit_price_usd=exit_price,
+                exit_tx=tx_hash,
+            )
+            for r in realized:
+                gain_usd = r["gain_loss_usd"]
+                logger.info(
+                    f"verify_unknown_sells: closed {token_in} | "
+                    f"P&L: ${gain_usd:+.2f} ({r['gain_loss_pct']:+.2f}%) | "
+                    f"held {r['hold_days']} days"
+                )
+                if gain_usd > 0:
+                    _cap.lock_profit(gain_usd)
+        except Exception as e:
+            logger.error(f"verify_unknown_sells: close_position failed for {token_in}: {e}")
+
+    if changed:
+        fieldnames = list(rows[0].keys()) if rows else []
+        tmp = tx_file + ".tmp"
+        with open(tmp, "w", newline="") as f:
+            writer = _csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(rows)
+        os.replace(tmp, tx_file)
+
+
 def main():
     validate()
 
@@ -168,6 +271,8 @@ def main():
 
     # Global startup: ensure all positions have cg_id for price tracking
     _backfill_position_cg_ids()
+    # Close any positions whose sell tx succeeded but timed out before receipt
+    _verify_unknown_sells(w3)
     # Remove ghost positions where wallet balance is confirmed zero on-chain
     _reconcile_positions(w3)
 

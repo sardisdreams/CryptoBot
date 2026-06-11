@@ -380,26 +380,42 @@ class TradingAgent:
                 lines.append(f"  - {s}")
 
         if open_pos:
-            lines += ["", "Open positions (entry → now | P&L | age):"]
+            lines += ["", "Open positions (entry → now | P&L | age | TP/SL):"]
             for p in open_pos:
                 hold_days = p['hold_days']
                 hold_str  = f"{hold_days}d" if hold_days >= 1 else "<1d"
                 age_warn  = " [LONG HOLD — reassess thesis]" if hold_days >= 5 else ""
+                tp_price  = p.get('take_profit_price')
+                sl_price  = p.get('stop_loss_price')
+                tp_str = f"TP ${tp_price:,.4f}" if tp_price else "TP n/a"
+                sl_str = f"SL ${sl_price:,.4f}" if sl_price else "SL n/a"
                 lines.append(
                     f"  {p['symbol']}: {p['amount_tokens']:.6f} tokens | "
                     f"entry ${p['entry_price']:,.4f} | now ${p['current_price']:,.4f} | "
                     f"cost ${p['cost_basis_usd']:.2f} | value ${p['current_value']:.2f} | "
                     f"P&L ${p['gain_loss_usd']:+,.2f} ({p['gain_loss_pct']:+.2f}%) | "
-                    f"held {hold_str}{age_warn}"
+                    f"held {hold_str} | {tp_str} | {sl_str}{age_warn}"
                 )
                 if p['gain_loss_pct'] <= -25:
-                    lines.append(f"    ** STOP-LOSS ZONE — down {p['gain_loss_pct']:.1f}%, strongly consider exiting **")
+                    lines.append(
+                        f"    !! SELL IMMEDIATELY: down {p['gain_loss_pct']:.1f}% — execute_swap to exit full position. "
+                        f"Minimum trade size does NOT apply to sells of existing positions. !!"
+                    )
                 elif p['gain_loss_pct'] >= 60:
-                    lines.append(f"    ** TAKE PROFIT L3 — up {p['gain_loss_pct']:.1f}%, consider selling 25% **")
+                    lines.append(
+                        f"    !! SELL NOW (TP-L3): up {p['gain_loss_pct']:.1f}% — execute_swap to sell 25% of this position. "
+                        f"No minimum size restriction on exits. !!"
+                    )
                 elif p['gain_loss_pct'] >= 40:
-                    lines.append(f"    ** TAKE PROFIT L2 — up {p['gain_loss_pct']:.1f}%, consider selling 25% **")
+                    lines.append(
+                        f"    !! SELL NOW (TP-L2): up {p['gain_loss_pct']:.1f}% — execute_swap to sell 25% of this position. "
+                        f"No minimum size restriction on exits. !!"
+                    )
                 elif p['gain_loss_pct'] >= 20:
-                    lines.append(f"    ** TAKE PROFIT L1 — up {p['gain_loss_pct']:.1f}%, consider selling 25% **")
+                    lines.append(
+                        f"    !! SELL NOW (TP-L1): up {p['gain_loss_pct']:.1f}% — execute_swap to sell 25% of this position. "
+                        f"No minimum size restriction on exits. !!"
+                    )
 
         fg = snapshot.get("fear_and_greed", {})
         lines += [
