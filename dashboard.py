@@ -846,6 +846,20 @@ def _get_airdrop_tokens(w3, wallet_address: str, open_pos: list[dict], prices: d
     SKIP_SYMS = set(TOKENS.keys()) | {"ETH", "WETH"}
     bot_syms   = {p["symbol"].upper() for p in open_pos}
 
+    # Also exclude tokens the bot bought that lost their position record.
+    # If transactions.csv has a successful buy of a token, it is NOT an airdrop.
+    _tx_file = "records/transactions.csv"
+    if os.path.exists(_tx_file):
+        try:
+            with open(_tx_file, newline="") as _f:
+                for row in csv.DictReader(_f):
+                    if row.get("status") == "success" and row.get("token_in", "").upper() in {"USDC", "USDT", "DAI"}:
+                        bought_sym = row.get("token_out", "").upper()
+                        if bought_sym and bought_sym not in SKIP_SYMS:
+                            bot_syms.add(bought_sym)
+        except Exception:
+            pass
+
     ERC20_META_ABI = [
         {"inputs": [], "name": "symbol",   "outputs": [{"type": "string"}], "type": "function"},
         {"inputs": [], "name": "decimals",  "outputs": [{"type": "uint8"}],  "type": "function"},

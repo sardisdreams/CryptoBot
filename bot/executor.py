@@ -209,8 +209,8 @@ class Executor:
             address=Web3.to_checksum_address(UNISWAP_V3_QUOTER), abi=QUOTER_ABI
         )
 
-    def get_quote(self, token_in: str, token_out: str, amount_in_wei: int, fee: int = DEFAULT_FEE) -> int:
-        # Try the requested fee tier first, then fall back to others
+    def get_quote(self, token_in: str, token_out: str, amount_in_wei: int, fee: int = DEFAULT_FEE) -> tuple[int, int]:
+        """Returns (amount_out, fee_tier_used). Tries all fee tiers; uses best result."""
         fee_tiers = [fee] + [f for f in [500, 3000, 10000] if f != fee]
         for f in fee_tiers:
             try:
@@ -223,12 +223,12 @@ class Executor:
                 }).call({"from": self.wallet.address})
                 if result[0] > 0:
                     if f != fee:
-                        logger.info(f"Quote succeeded on fee tier {f}")
-                    return result[0]
+                        logger.info(f"Quote succeeded on fee tier {f} (not default {fee})")
+                    return result[0], f
             except Exception:
                 continue
         logger.error(f"Quote failed on all fee tiers for {token_in} -> {token_out}")
-        return 0
+        return 0, fee
 
     def _ensure_approval(self, token_address: str, amount_wei: int):
         """Approve the router to spend ERC-20 tokens if allowance is insufficient."""
@@ -299,9 +299,11 @@ class Executor:
                 _log_swap_block(token_in_symbol, token_out_symbol, _amt_usd_approx, msg)
                 return None
 
-        # Try Uniswap V3 first, fall back to Aerodrome
+        # Try Uniswap V3 first, fall back to Aerodrome.
+        # get_quote returns the fee tier that actually has a pool — use it in the swap,
+        # not the default fee tier which may have no pool for this token pair.
         dex_used = "uniswap_v3"
-        amount_out = self.get_quote(token_in_address, token_out_address, amount_in_wei, fee)
+        amount_out, fee_used = self.get_quote(token_in_address, token_out_address, amount_in_wei, fee)
         aerodrome_routes = None
 
         if amount_out == 0:
@@ -413,7 +415,7 @@ class Executor:
             tx = self.router.functions.exactInputSingle({
                 "tokenIn": Web3.to_checksum_address(token_in_address),
                 "tokenOut": Web3.to_checksum_address(token_out_address),
-                "fee": fee,
+                "fee": fee_used,
                 "recipient": self.wallet.address,
                 "deadline": deadline,
                 "amountIn": amount_in_wei,
