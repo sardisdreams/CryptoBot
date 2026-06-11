@@ -648,56 +648,23 @@ class TradingAgent:
 
         return "\n".join(lines)
 
-    def _get_token_info(self, cg_id: str) -> str:
+    def _get_token_info(self, cg_id: str, live_prices: dict | None = None) -> str:
         # Sanitize cg_id — must be alphanumeric with hyphens only (CoinGecko ID format)
         import re
         if not cg_id or not re.match(r'^[a-z0-9\-]{1,80}$', cg_id):
             return f"Invalid CoinGecko ID format: '{cg_id}'. IDs must be lowercase alphanumeric with hyphens."
 
-        # Check local cache first — avoids CoinGecko API call for contract/decimals,
-        # but always refresh the price if cached_at is older than 1 hour.
-        PRICE_TTL_SECONDS = 3600
+        # Check local cache for static info (contract address, decimals, name).
+        # For price, always prefer the live snapshot price fetched at tick start —
+        # the cache price can be days old and will cause the agent to misjudge setups.
         cached = token_cache.get(cg_id)
         if cached:
-            # Refresh stale price in-place before using it
-            cached_at_str = cached.get("cached_at", "")
-            price_stale = True
-            if cached_at_str:
-                try:
-                    from datetime import timezone as _tz
-                    cached_at = datetime.fromisoformat(cached_at_str.replace("Z", "+00:00"))
-                    age = (datetime.now(_tz.utc) - cached_at).total_seconds()
-                    price_stale = age > PRICE_TTL_SECONDS
-                except Exception:
-                    pass
-            if price_stale:
-                import time as _time
-                import requests as _req
-                _time.sleep(1.0)
-                try:
-                    r = _req.get(
-                        "https://api.coingecko.com/api/v3/simple/price",
-                        params={"ids": cg_id, "vs_currencies": "usd"},
-                        timeout=10,
-                        verify=certifi.where(),
-                    )
-                    if r.status_code == 200:
-                        fresh_price = r.json().get(cg_id, {}).get("usd", 0)
-                        if fresh_price > 0:
-                            cached["price"] = fresh_price
-                            token_cache.store(
-                                cg_id=cg_id,
-                                address=cached["address"],
-                                decimals=cached["decimals"],
-                                name=cached.get("name", cg_id),
-                                price=fresh_price,
-                                symbol=cached.get("symbol", ""),
-                            )
-                            logger.info(f"Refreshed stale price for {cg_id}: ${fresh_price:,.6f}")
-                except Exception as e:
-                    logger.warning(f"Could not refresh price for {cg_id}: {e}")
-
-            logger.info(f"Token info from cache: {cg_id} @ ${cached.get('price', 0):,.6f}")
+            symbol = cached.get("symbol", "")
+            # Use the live tick price if we have it; fall back to a fresh CoinGecko fetch
+            live_price = (live_prices or {}).get(symbol.upper(), 0) if symbol else 0
+            if live_price > 0:
+                cached["price"] = live_price
+            logger.info(f"Token info from cache: {cg_id} @ ${cached.get('price', 0):,.6f} ({'live tick price' if live_price > 0 else 'cached'})")
             from bot.liquidity import check_base_liquidity
             liq = check_base_liquidity(
                 w3=self.portfolio.w3,
@@ -797,7 +764,7 @@ class TradingAgent:
         if tool_name == "get_token_info":
             cg_id = tool_input.get("cg_id", "")
             logger.info(f"Fetching token info: {cg_id}")
-            return self._get_token_info(cg_id)
+            return self._get_token_info(cg_id, live_prices=snapshot.get("prices", {}))
         if tool_name == "evaluate_coin":
             cg_id = tool_input.get("cg_id", "")
             logger.info(f"Evaluating coin: {cg_id}")
