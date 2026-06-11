@@ -20,6 +20,7 @@ REALIZED_HEADERS = [
     "term",           # "short" (<365 days) or "long" (>=365 days)
     "entry_tx",
     "exit_tx",
+    "entry_reasoning",
 ]
 
 
