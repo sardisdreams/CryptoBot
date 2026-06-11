@@ -637,11 +637,27 @@ class TradingAgent:
         cached = token_cache.get(cg_id)
         if cached:
             logger.info(f"Token info from cache: {cg_id}")
+            from bot.liquidity import check_base_liquidity
+            liq = check_base_liquidity(
+                w3=self.portfolio.w3,
+                token_address=cached["address"],
+                token_symbol=cached.get("symbol", cg_id),
+                token_price_usd=cached.get("price", 0),
+                token_decimals=cached.get("decimals", 18),
+            )
+            if not liq["liquid"]:
+                return (
+                    f"{cached['name']} ({cg_id}) FAILED LIQUIDITY CHECK — do NOT buy.\n"
+                    f"Reason: {liq['reason']}\n"
+                    f"Sell-side pool is too thin — buying this token risks being unable to exit "
+                    f"without a major loss. Choose a different token."
+                )
             return (
                 f"{cached['name']} ({cg_id})\n"
                 f"Base contract: {cached['address']}\n"
                 f"Decimals: {cached['decimals']}\n"
                 f"Price: ${cached.get('price', 0):,.6f}\n"
+                f"Liquidity: PASSED ({liq['reason']})\n"
                 f"Use these values in execute_swap."
             )
 
@@ -686,12 +702,31 @@ class TradingAgent:
                     )
                 sec_note = f"\nSecurity: PASSED GoPlus check (no honeypot, sell_tax={security.get('sell_tax', 0):.0%})"
 
+            # Run sell-side liquidity check — a token that can't be exited safely is not worth buying
+            from bot.liquidity import check_base_liquidity
+            liq = check_base_liquidity(
+                w3=self.portfolio.w3,
+                token_address=contract,
+                token_symbol=symbol_guess,
+                token_price_usd=price,
+                token_decimals=decimals,
+            )
+            if not liq["liquid"]:
+                return (
+                    f"{name} ({cg_id}) FAILED LIQUIDITY CHECK — do NOT buy.\n"
+                    f"Reason: {liq['reason']}\n"
+                    f"Sell-side pool is too thin — buying this token risks being unable to exit "
+                    f"without a major loss. Choose a different token."
+                )
+            liq_note = f"\nLiquidity: PASSED ({liq['reason']})"
+
             return (
                 f"{name} ({cg_id})\n"
                 f"Base contract: {contract}\n"
                 f"Decimals: {decimals}\n"
                 f"Price: ${price:,.6f}"
-                f"{sec_note}\n"
+                f"{sec_note}"
+                f"{liq_note}\n"
                 f"Use these values in execute_swap."
             )
         except Exception as e:
