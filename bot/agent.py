@@ -135,7 +135,8 @@ Grow the portfolio through disciplined short-term trading. Protect capital first
 - Capital floor: a protected reserve you never touch. Displayed each tick.
 - Max deploy: everything above the floor can be deployed across open positions.
 - Trade size: 5–10% of total portfolio per trade (shown each tick).
-- Always keep at least 0.005 ETH for gas — never trade it.
+- Always keep at least 0.002 ETH for gas — never trade it.
+- Native ETH in the wallet cannot be swapped directly. Use wrap_eth to convert it to WETH first, then execute_swap WETH→token. Leave 0.002 ETH unwrapped for gas.
 - Recovery mode: if USDC drops below the floor, hold cash, make NO new entries until recovered.
 
 ## Trading style
@@ -277,6 +278,23 @@ TOOLS = [
                 "confidence":         {"type": "integer", "description": "Your conviction score 1-10. Trades with confidence < 6 are blocked. Be honest: 8-10=strong signal, 6-7=reasonable, 1-5=do not trade."},
             },
             "required": ["token_in", "token_out", "amount_usd", "reasoning", "confidence"],
+        },
+    },
+    {
+        "name": "wrap_eth",
+        "description": (
+            "Wrap native ETH in the wallet into WETH so it can be used in swaps. "
+            "The wallet holds native ETH from gas refunds and initial funding that cannot be traded directly. "
+            "Call this to convert ETH to WETH before executing a WETH→token swap. "
+            "Check the portfolio ETH balance first; leave at least 0.002 ETH unwrapped for future gas."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "eth_amount": {"type": "number", "description": "Amount of ETH to wrap (e.g. 0.05). Leave 0.002 for gas."},
+                "reasoning":  {"type": "string", "description": "Why you are wrapping ETH now."},
+            },
+            "required": ["eth_amount", "reasoning"],
         },
     },
     {
@@ -602,7 +620,7 @@ class TradingAgent:
             self.last_best_signal_score = scored[0]["signal"]["score"] if scored else 0
 
             if passing:
-                lines += ["", "== SIGNAL-FILTERED OPPORTUNITIES (score ≥ 60/100) ==",
+                lines += ["", "== SIGNAL-FILTERED OPPORTUNITIES (score ≥ 55/100) ==",
                           "These passed EMA trend + RSI + dip + momentum + macro + volatility filters.",
                           "Use signal stop_pct as stop_loss_pct and target_pct as take_profit_pct in execute_swap."]
                 for s in passing:
@@ -750,6 +768,17 @@ class TradingAgent:
             content = tool_input.get("content", "")
             logger.info(f"Saving knowledge [{cat}]: {content[:80]}")
             return knowledge.add_entry(cat, content)
+        if tool_name == "wrap_eth":
+            eth_amount = float(tool_input.get("eth_amount", 0))
+            reasoning  = tool_input.get("reasoning", "")
+            if eth_amount <= 0:
+                return "wrap_eth: eth_amount must be > 0"
+            logger.info(f"Wrapping {eth_amount:.6f} ETH → WETH | {reasoning}")
+            try:
+                tx_hash = self.executor.wrap_eth(eth_amount)
+                return f"Wrapped {eth_amount:.6f} ETH → WETH successfully | tx {tx_hash[:16] if tx_hash else 'None'}"
+            except Exception as e:
+                return f"wrap_eth failed: {e}"
         return self._execute_tool(tool_input, snapshot)
 
     def _execute_tool(self, tool_input: dict, snapshot: dict) -> str:

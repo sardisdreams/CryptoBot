@@ -554,3 +554,39 @@ class Executor:
             recorder.update_status(tx_hash, "unknown")
 
         return tx_hash
+
+    def wrap_eth(self, eth_amount: float) -> str:
+        """
+        Wrap native ETH into WETH so it can be used in ERC-20 swaps.
+        Calls WETH deposit() with the specified ETH amount.
+        Returns tx_hash on success, raises on failure.
+        """
+        WETH_ABI = [{
+            "name": "deposit",
+            "type": "function",
+            "stateMutability": "payable",
+            "inputs": [],
+            "outputs": [],
+        }]
+        amount_wei = int(eth_amount * 10**18)
+        eth_balance = self.w3.eth.get_balance(self.wallet.address)
+        gas_reserve = 5 * 10**14  # keep 0.0005 ETH for gas
+        if eth_balance < amount_wei + gas_reserve:
+            raise ValueError(
+                f"Insufficient ETH: have {eth_balance/1e18:.6f}, need {eth_amount:.6f} + gas reserve"
+            )
+        weth = self.w3.eth.contract(
+            address=Web3.to_checksum_address(WETH_ADDRESS), abi=WETH_ABI
+        )
+        gas_price = self.w3.eth.gas_price
+        tx = weth.functions.deposit().build_transaction({
+            "from":     self.wallet.address,
+            "value":    amount_wei,
+            "gas":      60_000,
+            "gasPrice": gas_price,
+            "nonce":    self.wallet.get_nonce(),
+            "chainId":  BASE_CHAIN_ID,
+        })
+        tx_hash = self.wallet.sign_and_send(tx)
+        logger.info(f"Wrapped {eth_amount:.6f} ETH → WETH | tx {tx_hash[:12] if tx_hash else 'None'}")
+        return tx_hash
