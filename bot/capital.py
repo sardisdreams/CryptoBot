@@ -59,12 +59,12 @@ def get_max_deploy(total_portfolio_usd: float) -> float:
 
 
 def get_trade_size_range(total_portfolio_usd: float) -> tuple[float, float]:
-    """Min and max trade size: 5-10% of total portfolio, clamped to sensible bounds."""
+    """Min and max trade size: 5-15% of total portfolio, clamped to sensible bounds."""
     min_trade = max(20.0, round(total_portfolio_usd * 0.05, 0))
-    max_trade = max(min_trade, round(total_portfolio_usd * 0.10, 0))
-    # Hard caps: never trade less than $20 or more than $100 in testing phase
+    max_trade = max(min_trade, round(total_portfolio_usd * 0.15, 0))
+    # Hard caps: never trade less than $20 or more than $150
     min_trade = min(min_trade, 50.0)
-    max_trade = min(max_trade, 100.0)
+    max_trade = min(max_trade, 150.0)
     return min_trade, max_trade
 
 
