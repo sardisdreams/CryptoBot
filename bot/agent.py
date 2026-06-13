@@ -1194,6 +1194,20 @@ class TradingAgent:
         model = "claude-sonnet-4-6" if active else "claude-haiku-4-5-20251001"
         logger.info(f"Using model: {model} (market active: {active}, monthly: ${spent:.2f}/${budget:.2f})")
 
+        # Skip Claude entirely when there is nothing actionable:
+        # no open positions to manage + no signal near the entry threshold.
+        # The screener and signal scoring still ran (dashboard needs them),
+        # but there is no decision to make so the API call adds zero value.
+        open_positions = positions.get_open_positions()
+        has_open = any(lots for lots in open_positions.values())
+        best_score = self.last_best_signal_score
+        if not has_open and best_score < 45:
+            logger.info(
+                f"No positions + best signal {best_score}/100 — skipping Claude API call. "
+                f"Resuming when score ≥ 45 or a position opens."
+            )
+            return
+
         messages = [{"role": "user", "content": market_context}]
 
         response = self.client.messages.create(
