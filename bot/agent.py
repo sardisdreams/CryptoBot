@@ -614,7 +614,7 @@ class TradingAgent:
         # Signal-scored candidates using real daily OHLCV (EMA50, RSI, ATR, dip, momentum)
         # OHLCV is cached 4h per token — first run is slow, subsequent calls are instant
         if base_coins:
-            top_by_vol = sorted(base_coins, key=lambda c: c.get("volume_24h", 0), reverse=True)[:20]
+            top_by_vol = sorted(base_coins, key=lambda c: c.get("volume_24h", 0), reverse=True)
             scored     = _score_candidates(top_by_vol, regime["regime"])
             passing    = [s for s in scored if s["signal"]["entry_ok"]]
             self.last_best_signal_score = scored[0]["signal"]["score"] if scored else 0
