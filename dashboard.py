@@ -608,7 +608,7 @@ HTML = """
       <tr>
         <td style="color:#64748b;font-size:0.73rem">{{ t.date_utc | to_est }}</td>
         <td>{{ t.token_in }}</td>
-        <td>${{ "%.2f"|format(t.amount_in|float) }}</td>
+        <td>${{ "%.2f"|format(t.amount_usd|float) }}</td>
         <td>{{ t.token_out }}</td>
         <td style="color:#64748b">{{ t.gas_cost_eth }}</td>
         <td><span class="pill {{ 'success' if t.status == 'success' else 'failed' }}">{{ t.status }}</span></td>
@@ -1113,12 +1113,23 @@ def _get_recent_issues(n: int = 20) -> list[dict]:
                     else:
                         tx_type = "pending"
                         reason  = "Pending confirmation"
+                    tok_in  = row.get("token_in", "?")
+                    tok_out = row.get("token_out", "?")
+                    # For buys (stable→token): amount_in is the USDC/stable amount = USD
+                    # For sells (token→stable): amount_in is the token quantity;
+                    #   use amount_out (raw stablecoin units) for correct USD value
+                    _stables = {"USDC", "USDT", "DAI"}
+                    if tok_out in _stables:
+                        _dec = 6 if tok_out in {"USDC", "USDT"} else 18
+                        _amount_usd = float(row.get("amount_out", 0) or 0) / (10 ** _dec)
+                    else:
+                        _amount_usd = float(row.get("amount_in", 0) or 0)
                     issues.append({
                         "ts":         row.get("date_utc", ""),
                         "type":       tx_type,
-                        "token_in":   row.get("token_in", "?"),
-                        "token_out":  row.get("token_out", "?"),
-                        "amount_usd": row.get("amount_in", 0),
+                        "token_in":   tok_in,
+                        "token_out":  tok_out,
+                        "amount_usd": _amount_usd,
                         "reason":     reason,
                         "tx_hash":    row.get("tx_hash", ""),
                     })
@@ -1216,6 +1227,14 @@ def index():
     realized   = get_realized_summary()
     closed     = _load_csv("records/realized_gains.csv")
     txns       = list(reversed(_load_csv("records/transactions.csv")))
+    # Add amount_usd to each txn: buys use amount_in (USDC=$USD); sells use amount_out/1e6
+    _txn_stables = {"USDC", "USDT", "DAI"}
+    for _t in txns:
+        if _t.get("token_out") in _txn_stables:
+            _dec = 6 if _t.get("token_out") in {"USDC", "USDT"} else 18
+            _t["amount_usd"] = float(_t.get("amount_out", 0) or 0) / (10 ** _dec)
+        else:
+            _t["amount_usd"] = float(_t.get("amount_in", 0) or 0)
 
     from bot.token_cache import list_all as list_token_cache
     tc = list_token_cache()

@@ -614,7 +614,7 @@ class TradingAgent:
         # Signal-scored candidates using real daily OHLCV (EMA50, RSI, ATR, dip, momentum)
         # OHLCV is cached 4h per token — first run is slow, subsequent calls are instant
         if base_coins:
-            top_by_vol = sorted(base_coins, key=lambda c: c.get("volume_24h", 0), reverse=True)[:8]
+            top_by_vol = sorted(base_coins, key=lambda c: c.get("volume_24h", 0), reverse=True)[:20]
             scored     = _score_candidates(top_by_vol, regime["regime"])
             passing    = [s for s in scored if s["signal"]["entry_ok"]]
             self.last_best_signal_score = scored[0]["signal"]["score"] if scored else 0
@@ -1184,7 +1184,7 @@ class TradingAgent:
         active = self._is_market_active(snapshot)
 
         # Budget guard — force Haiku when >80% of monthly budget is consumed
-        budget = float(os.getenv("ANTHROPIC_BUDGET_USD", "25"))
+        budget = float(os.getenv("ANTHROPIC_BUDGET_USD", "30"))
         spent  = get_cost_summary().get("anthropic_month", 0)
         if budget > 0 and spent >= budget * 0.8:
             if active:
