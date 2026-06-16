@@ -1210,13 +1210,23 @@ class TradingAgent:
 
         messages = [{"role": "user", "content": market_context}]
 
-        response = self.client.messages.create(
-            model=model,
-            max_tokens=2048 if not active else 4096,
-            system=SYSTEM_PROMPT,
-            tools=TOOLS,
-            messages=messages,
-        )
+        try:
+            response = self.client.messages.create(
+                model=model,
+                max_tokens=2048 if not active else 4096,
+                system=SYSTEM_PROMPT,
+                tools=TOOLS,
+                messages=messages,
+            )
+        except anthropic.APIStatusError as e:
+            if "usage limits" in str(e) or "credit balance" in str(e):
+                logger.error(f"Anthropic API limit reached — pausing Claude calls: {e}")
+                import json as _json
+                os.makedirs("data", exist_ok=True)
+                with open("data/credit_alert.json", "w") as _f:
+                    _json.dump({"ts": datetime.now(timezone.utc).isoformat(), "active": True}, _f)
+                return  # skip this tick; next tick will retry after the interval
+            raise
 
         # Agentic loop — handle tool calls until model stops
         while response.stop_reason == "tool_use":

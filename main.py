@@ -337,10 +337,16 @@ if __name__ == "__main__":
             logger.info("Bot stopped by user.")
             break
         except Exception as e:
-            logger.error(f"Bot crashed: {e} — restarting in {RESTART_DELAY}s...")
-            # Flag credit exhaustion so dashboard can alert the user
-            if "credit balance is too low" in str(e):
+            err_str = str(e)
+            # Flag credit / API limit exhaustion so dashboard and health monitor can alert
+            is_api_limit = "usage limits" in err_str or "credit balance" in err_str
+            if is_api_limit:
                 os.makedirs("data", exist_ok=True)
                 with open("data/credit_alert.json", "w") as _f:
                     json.dump({"ts": datetime.now(timezone.utc).isoformat(), "active": True}, _f)
-            time.sleep(RESTART_DELAY)
+                # Retrying every 30s won't help — sleep 30min and let the schedule fire again
+                logger.error(f"Anthropic API limit hit — pausing 30min before retry: {e}")
+                time.sleep(1800)
+            else:
+                logger.error(f"Bot crashed: {e} — restarting in {RESTART_DELAY}s...")
+                time.sleep(RESTART_DELAY)
