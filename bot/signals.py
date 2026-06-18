@@ -60,16 +60,26 @@ def score_entry(cg_id: str, symbol: str, current_price: float, btc_regime: str) 
         else:
             conditions.append(f"✗ RSI {rsi:.0f} — weak / selling pressure")
 
-    # ── 3. DIP ENTRY: 5-25% below 20-day high (15 pts) ───────────────────────
-    high_20d = max(highs[-20:]) if len(highs) >= 20 else max(highs)
-    pullback  = (high_20d - current_price) / high_20d * 100 if high_20d > 0 else 0
-    if 5 <= pullback <= 25:
-        score += 15
-        conditions.append(f"✓ {pullback:.1f}% below 20d high — healthy dip")
-    elif pullback < 5:
-        conditions.append(f"✗ Only {pullback:.1f}% off high — chasing, poor R/R")
+    # ── 3. DIP ENTRY: 5-25% below 20-day high, but not near 5-day high (15 pts) ──
+    high_20d    = max(highs[-20:]) if len(highs) >= 20 else max(highs)
+    high_5d     = max(highs[-5:])  if len(highs) >= 5  else max(highs)
+    pullback_20 = (high_20d - current_price) / high_20d * 100 if high_20d > 0 else 0
+    pullback_5  = (high_5d  - current_price) / high_5d  * 100 if high_5d  > 0 else 0
+    if 5 <= pullback_20 <= 25:
+        if pullback_5 < 3:
+            # Price is near/at the 5-day high — not a fresh dip, just at recent resistance
+            score += 5
+            conditions.append(
+                f"~ {pullback_20:.1f}% off 20d high but only {pullback_5:.1f}% off 5d high "
+                f"— price at recent top, not a clean dip entry"
+            )
+        else:
+            score += 15
+            conditions.append(f"✓ {pullback_20:.1f}% below 20d high, {pullback_5:.1f}% below 5d high — healthy dip")
+    elif pullback_20 < 5:
+        conditions.append(f"✗ Only {pullback_20:.1f}% off 20d high — chasing, poor R/R")
     else:
-        conditions.append(f"✗ {pullback:.1f}% below 20d high — too damaged")
+        conditions.append(f"✗ {pullback_20:.1f}% below 20d high — too damaged")
 
     # ── 4. MOMENTUM: price > SMA10 > SMA20 (15 pts) ──────────────────────────
     sma10 = _sma(closes, 10)
@@ -141,10 +151,9 @@ def score_candidates(candidates: list[dict], btc_regime: str) -> list[dict]:
     """
     Score a list of screener candidates. Returns list sorted by score descending.
     Adds a 'signal' key to each candidate dict.
-    Only top 8 candidates are scored to limit CoinGecko API calls;
-    remaining get score=0 (OHLCV cached after first fetch so subsequent ticks are fast).
+    OHLCV is cached 4h per token so subsequent ticks are fast.
     """
-    to_score   = [c for c in candidates if c.get("cg_id") and c.get("price", 0) > 0][:8]
+    to_score   = [c for c in candidates if c.get("cg_id") and c.get("price", 0) > 0]
     skip       = [c for c in candidates if c not in to_score]
 
     scored = []

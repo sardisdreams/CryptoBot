@@ -183,10 +183,9 @@ Always pass token_out_cg_id in the execute_swap call so the position can be trac
 Fast in-out trades. Buy near weekly low, sell at TP, sit in USDC, repeat.
 Use tight parameters: take_profit_pct=8, stop_loss_pct=8.
 
-Current swing targets:
+Current swing targets (updated ranges injected in market context each tick):
 """ + "\n".join(
-    f"- {sym}: {info['description']} | week range ${info['weekly_range_low']}–${info['weekly_range_high']} | "
-    f"TP +{info['take_profit_pct']}% SL -{info['stop_loss_pct']}%"
+    f"- {sym}: {info['description']} | TP +{info['take_profit_pct']}% SL -{info['stop_loss_pct']}%"
     for sym, info in SWING_TARGETS.items()
 ) + """
 
@@ -570,6 +569,28 @@ class TradingAgent:
             lines += ["", "Analyst notes / upcoming catalysts (from notes.txt):"]
             for note in notes:
                 lines.append(f"  - {note}")
+
+        # Swing targets with live range position — helps agent know if price is at top/bottom of range
+        live_prices = snapshot.get("prices", {})
+        swing_lines = []
+        for sym, info in SWING_TARGETS.items():
+            lo  = info.get("weekly_range_low", 0)
+            hi  = info.get("weekly_range_high", 0)
+            cur = live_prices.get(sym, 0)
+            if hi > lo and cur > 0:
+                pct_of_range = round((cur - lo) / (hi - lo) * 100)
+                range_note = f"${lo}–${hi} | currently at {pct_of_range}% of 7d range"
+            elif lo > 0 and hi > 0:
+                range_note = f"${lo}–${hi} | live price unavailable"
+            else:
+                range_note = "7d range not yet calibrated"
+            swing_lines.append(
+                f"  {sym}: {info['description']} | {range_note} | "
+                f"TP +{info['take_profit_pct']}% SL -{info['stop_loss_pct']}%"
+            )
+        if swing_lines:
+            lines += ["", "Swing target ranges (buy near 0%, sell near 100%):"]
+            lines.extend(swing_lines)
 
         # Persistent knowledge base — patterns and observations saved from prior runs
         kb = knowledge.get_summary()
