@@ -163,6 +163,13 @@ Base protocol TVL up >5% in 24h with positive price momentum. Real capital inflo
 **Setup 5 — RSI Oversold Recovery**
 RSI below 30 AND 1h momentum just turned positive. High conviction — use only on liquid tokens.
 
+## Performance tier — what it controls
+The tier (CONSERVE / CAUTIOUS / ACTIVE / AGGRESSIVE / FULL) affects scan interval and position sizing only.
+It does NOT restrict which entry setups are valid. All Setups 1–5 are available in every tier.
+The code enforces its own guards (win rate, drawdown, position cap). If you are executing a trade,
+the guards already passed. Do NOT invent setup restrictions based on tier name or win rate history —
+that is the code's job, not yours.
+
 ## Exits — use your judgment
 - Sell into strength when momentum fades — don't wait for the full move.
 - If the trade thesis breaks (momentum reversal, bad news), exit regardless of P&L.
@@ -969,24 +976,25 @@ class TradingAgent:
     def _is_market_active(self, snapshot: dict) -> bool:
         """
         Decide whether to use Sonnet (full reasoning) or Haiku (cheap scan).
-        Uses market regime to avoid wasting Sonnet in strong downtrends.
+        Sonnet is only used when there is something concrete to reason about —
+        a qualifying signal, a position in trouble, or a strong intraday move.
+        F&G and RSI extremes on registry tokens are NOT sufficient on their own.
         """
-        fg          = snapshot.get("fear_and_greed", {}).get("value", 50)
-        market_data = snapshot.get("market_data", {})
-        threshold   = self.current_tier.get("sonnet_threshold", 5.0)
+        fg = snapshot.get("fear_and_greed", {}).get("value", 50)
 
         # Always Sonnet if tier requires it (high profit mode)
         if self.current_tier.get("always_sonnet"):
             return True
 
-        # Compute regime — skip Sonnet in bear markets unless positions are in crisis
-        btc_ind = history.get_indicators("cbBTC")
-        regime  = history.get_market_regime(btc_ind, fg)
+        btc_ind      = history.get_indicators("cbBTC")
+        regime       = history.get_market_regime(btc_ind, fg)
         regime_label = regime["regime"]
+        threshold    = self.current_tier.get("sonnet_threshold", 5.0)
+        market_data  = snapshot.get("market_data", {})
+        open_pos     = positions.get_position_summary(snapshot.get("prices", {}))
 
-        # In STRONG_BEAR or BEAR: only escalate if a position is in genuine crisis (>30%)
+        # Bear market: only Sonnet if a position is in genuine crisis (>30% P&L move)
         if regime_label in ("STRONG_BEAR", "BEAR"):
-            open_pos = positions.get_position_summary(snapshot.get("prices", {}))
             for p in open_pos:
                 if abs(p.get("gain_loss_pct", 0)) >= 30:
                     logger.info(f"Market active ({regime_label} override): {p['symbol']} P&L={p['gain_loss_pct']:+.1f}%")
@@ -994,43 +1002,36 @@ class TradingAgent:
             logger.info(f"{regime_label} regime — using Haiku (no positions in crisis)")
             return False
 
-        # Escalate on extreme Fear & Greed (opportunity or danger)
-        if fg <= 20 or fg >= 80:
-            logger.info(f"Market active: extreme F&G={fg}")
+        # Near-qualifying signal — worth Sonnet reasoning (score set by _build_market_prompt)
+        best_score = getattr(self, "last_best_signal_score", 0)
+        if best_score >= 45:
+            logger.info(f"Market active: best signal score {best_score}/100")
             return True
 
-        # Escalate if any tracked coin moved significantly in 1h
+        # Open position needs attention (±20% P&L)
+        for p in open_pos:
+            if abs(p.get("gain_loss_pct", 0)) >= 20:
+                logger.info(f"Market active: {p['symbol']} P&L={p['gain_loss_pct']:+.1f}%")
+                return True
+
+        # Open position held >3 days needs a proper review
+        for p in open_pos:
+            if p.get("hold_days", 0) >= 3:
+                logger.info(f"Market active: {p['symbol']} held {p['hold_days']}d — review needed")
+                return True
+
+        # Strong intraday price move on any tracked coin
         for sym, d in market_data.items():
             if abs(d.get("change_1h", 0)) >= threshold:
                 logger.info(f"Market active: {sym} moved {d['change_1h']:+.1f}% (threshold {threshold}%)")
                 return True
 
-        # Escalate if screener found strong gainers/losers
-        for coin in snapshot.get("top_gainers", []):
-            if abs(coin.get("change_24h", 0)) >= threshold * 2:
-                logger.info(f"Market active: screener {coin['symbol']} {coin['change_24h']:+.1f}%")
-                return True
-
-        # Escalate on urgent analyst note
+        # Urgent analyst note
         if any(n.upper().startswith("[URGENT]") for n in _read_notes()):
             logger.info("Market active: urgent analyst note")
             return True
 
-        # Escalate if any indicator is at extremes (RSI oversold/overbought)
-        indicators = history.get_all_indicators([s for s in TOKENS if s not in {"USDC","USDT","DAI"}])
-        for sym, ind in indicators.items():
-            rsi = ind.get("rsi_14")
-            if rsi and (rsi <= 30 or rsi >= 70):
-                logger.info(f"Market active: {sym} RSI={rsi:.0f}")
-                return True
-
-        # Escalate if any open position needs attention (±25% P&L in neutral/bull)
-        open_pos = positions.get_position_summary(snapshot.get("prices", {}))
-        for p in open_pos:
-            if abs(p.get("gain_loss_pct", 0)) >= 25:
-                logger.info(f"Market active: {p['symbol']} P&L={p['gain_loss_pct']:+.1f}%")
-                return True
-
+        logger.info("Haiku: no signals ≥45, no positions in crisis, no strong moves")
         return False
 
     def run_once(self):

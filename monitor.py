@@ -28,7 +28,7 @@ TOKEN_CACHE = "data/token_cache.json"
 CREDIT_ALERT = "data/credit_alert.json"
 
 # How long before we consider the bot "stuck" (3x the slowest tier interval)
-MAX_TICK_GAP_MINUTES = 105  # 3 × 35min (CONSERVE 30min + buffer)
+MAX_TICK_GAP_MINUTES = 195  # 3 × 65min (CONSERVE 60min + buffer)
 
 
 def _load_json(path: str) -> dict | list:
