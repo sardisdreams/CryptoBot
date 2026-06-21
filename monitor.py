@@ -28,7 +28,7 @@ TOKEN_CACHE = "data/token_cache.json"
 CREDIT_ALERT = "data/credit_alert.json"
 
 # How long before we consider the bot "stuck" (3x the slowest tier interval)
-MAX_TICK_GAP_MINUTES = 195  # 3 × 65min (CONSERVE 60min + buffer)
+MAX_TICK_GAP_MINUTES = 60  # 3 × 15min (CONSERVE) + 15min buffer
 
 
 def _load_json(path: str) -> dict | list:
@@ -65,7 +65,7 @@ def check_bot_alive() -> str | None:
             return (
                 f"Bot has not ticked in {age_minutes:.0f} minutes "
                 f"(last tick: {data['ts'][:16]} UTC). "
-                f"Expected every ~60min. May be stuck or crashed."
+                f"Expected every ~15min. May be stuck or crashed."
             )
     except Exception as e:
         return f"Could not parse last_tick.json: {e}"

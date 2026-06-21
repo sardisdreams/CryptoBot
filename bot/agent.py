@@ -1,5 +1,6 @@
 import os
 import json
+import time
 import httpx
 import certifi
 import anthropic
@@ -329,12 +330,16 @@ TOOLS = [
 ]
 
 
+AUTO_EXEC_THRESHOLD = 55  # auto-execute buys when signal score >= this, no Claude needed
+
+
 class TradingAgent:
     def __init__(self, portfolio: Portfolio, executor: Executor):
         self.portfolio    = portfolio
         self.executor     = executor
         self.current_tier = {"sonnet_threshold": 5.0, "always_sonnet": False, "label": "CONSERVE"}
         self.last_best_signal_score = 0  # set after each tick for adaptive interval
+        self._last_claude_review_ts = 0.0  # unix timestamp of last Claude API call
         self.client = anthropic.Anthropic(
             api_key=ANTHROPIC_API_KEY,
             http_client=httpx.Client(verify=certifi.where()),
@@ -1002,7 +1007,7 @@ class TradingAgent:
             logger.info(f"{regime_label} regime — using Haiku (no positions in crisis)")
             return False
 
-        # Near-qualifying signal — worth Sonnet reasoning (score set by _build_market_prompt)
+        # Near-qualifying signal — worth Sonnet reasoning (score set in run_once before this call)
         best_score = getattr(self, "last_best_signal_score", 0)
         if best_score >= 45:
             logger.info(f"Market active: best signal score {best_score}/100")
@@ -1033,6 +1038,282 @@ class TradingAgent:
 
         logger.info("Haiku: no signals ≥45, no positions in crisis, no strong moves")
         return False
+
+    # ── Mechanical execution (no Claude API call) ───────────────────────────────
+
+    def _auto_execute(self, snapshot: dict, scored: list[dict]) -> dict | None:
+        """
+        Buy the best qualifying signal (score >= AUTO_EXEC_THRESHOLD) without calling Claude.
+        Runs every tick before the Claude-review decision. Returns the executed candidate
+        dict (with 'auto_executed' key set) or None if no trade was made.
+        """
+        total_usd = snapshot.get("total_usd", 0)
+        usdc_bal  = snapshot.get("holdings", {}).get("USDC", {}).get("value_usd", 0)
+        cap       = capital.get_summary(total_usd, usdc_bal)
+
+        if cap["in_recovery"]:
+            logger.info("Auto-execute: recovery mode — no new entries")
+            return None
+
+        fg_val  = snapshot.get("fear_and_greed", {}).get("value", 50)
+        btc_ind = history.get_indicators("cbBTC")
+        regime  = history.get_market_regime(btc_ind, fg_val)
+
+        open_count = len([k for k, v in positions.get_open_positions().items() if v])
+        allowed, allow_reason = risk.can_open_trade(total_usd, open_count, regime_label=regime["regime"])
+        if not allowed:
+            logger.info(f"Auto-execute: risk guard blocked — {allow_reason}")
+            return None
+
+        trade_usd = cap["max_trade"]
+        if trade_usd < cap["min_trade"]:
+            logger.info(f"Auto-execute: trade size ${trade_usd:.2f} below minimum ${cap['min_trade']:.2f}")
+            return None
+
+        # Enforce deployment cap
+        open_pos   = positions.get_position_summary(snapshot.get("prices", {}))
+        deployed   = sum(p["cost_basis_usd"] for p in open_pos)
+        max_deploy = cap["max_deploy"]
+        if deployed + trade_usd > max_deploy:
+            remaining = max_deploy - deployed
+            if remaining < cap["min_trade"]:
+                logger.info(f"Auto-execute: deployment cap reached (${deployed:.0f}/${max_deploy:.0f})")
+                return None
+            trade_usd = min(trade_usd, remaining)
+
+        for candidate in scored:
+            sig   = candidate["signal"]
+            score = sig["score"]
+            if score < AUTO_EXEC_THRESHOLD:
+                break
+
+            sym   = candidate.get("symbol", "")
+            cg_id = candidate.get("cg_id", "")
+            price = candidate.get("price", 0)
+
+            if price <= 0:
+                continue
+
+            if blacklist.is_blocked(sym, cg_id):
+                continue
+
+            ok, cooldown_reason = risk.check_stopout_cooldown(sym)
+            if not ok:
+                logger.info(f"Auto-execute: {sym} in stopout cooldown — {cooldown_reason}")
+                continue
+
+            # Don't auto-stack an existing position — let Claude decide on adds
+            open_positions = positions.get_open_positions()
+            if open_positions.get(sym):
+                logger.info(f"Auto-execute: already hold {sym} — skipping (Claude can add if warranted)")
+                continue
+
+            # Resolve token address from registry or cache
+            token_info = TOKENS.get(sym)
+            if not token_info:
+                cached = token_cache.get(cg_id)
+                if cached:
+                    token_info = {
+                        "address":  cached["address"],
+                        "decimals": cached["decimals"],
+                        "symbol":   sym,
+                    }
+            if not token_info:
+                logger.info(f"Auto-execute: {sym} has no cached address — Claude must call get_token_info first")
+                continue
+
+            # Cap trade to 98% of available USDC
+            usdc_limit = usdc_bal * 0.98
+            if trade_usd > usdc_limit:
+                trade_usd = usdc_limit
+            if trade_usd < cap["min_trade"]:
+                logger.info(f"Auto-execute: insufficient USDC (${usdc_bal:.2f})")
+                return None
+
+            usdc_info = TOKENS["USDC"]
+            trade_wei = int(trade_usd * (10 ** usdc_info["decimals"]))
+
+            tp_pct = sig.get("target_pct") or 8.0
+            sl_pct = sig.get("stop_pct")   or 4.0
+
+            cond_str  = " | ".join(sig.get("conditions", []))
+            reasoning = (
+                f"Auto-entry (score={score}/100): {sym} | {cond_str} | "
+                f"RSI={sig.get('rsi','?')} ATR={sig.get('atr_pct','?')}% | "
+                f"TP={tp_pct:.1f}% SL={sl_pct:.1f}%"
+            )
+
+            logger.info(
+                f"Auto-execute: buying {sym} | score={score}/100 | "
+                f"${trade_usd:.0f} | TP={tp_pct:.1f}% SL={sl_pct:.1f}%"
+            )
+
+            tx = self.executor.swap(
+                token_in_address=usdc_info["address"],
+                token_in_symbol="USDC",
+                token_in_decimals=usdc_info["decimals"],
+                token_out_address=token_info["address"],
+                token_out_symbol=sym,
+                amount_in_wei=trade_wei,
+                price_eth_usd=snapshot["prices"].get("WETH", 0),
+                token_in_price_usd=1.0,
+                token_out_price_usd=price,
+                take_profit_pct=tp_pct,
+                stop_loss_pct=sl_pct,
+                entry_reasoning=reasoning,
+                cg_id=cg_id,
+            )
+
+            if tx:
+                logger.info(f"Auto-execute success: {sym} | tx {tx[:12] if tx else ''}")
+                candidate["auto_executed"] = True
+                candidate["auto_tx"] = tx
+                return candidate
+            else:
+                logger.warning(f"Auto-execute: {sym} swap failed — trying next candidate")
+
+        return None
+
+    def _needs_claude_review(
+        self,
+        snapshot: dict,
+        scored: list[dict],
+        auto_executed: dict | None,
+    ) -> tuple[bool, str]:
+        """
+        Return (needs_review, reason). Claude is only called when there is a
+        genuine decision to make that mechanical execution can't handle.
+        """
+        open_pos = positions.get_position_summary(snapshot.get("prices", {}))
+
+        # Position at ±15% — needs attention
+        for p in open_pos:
+            pnl = p.get("gain_loss_pct", 0)
+            if abs(pnl) >= 15:
+                return True, f"position {p['symbol']} at {pnl:+.1f}%"
+
+        # Position held >= 2 days — periodic check
+        for p in open_pos:
+            if p.get("hold_days", 0) >= 2:
+                return True, f"position {p['symbol']} held {p['hold_days']}d"
+
+        # Borderline signal (48 <= score < AUTO_EXEC_THRESHOLD) — judgment call
+        borderline = [s for s in scored if 48 <= s["signal"]["score"] < AUTO_EXEC_THRESHOLD]
+        if borderline:
+            top = borderline[0]
+            return True, f"borderline signal {top.get('symbol','?')} score={top['signal']['score']}"
+
+        # Top signal has no cached address — Claude must call get_token_info
+        if scored:
+            top = scored[0]
+            if top["signal"]["score"] >= AUTO_EXEC_THRESHOLD:
+                sym   = top.get("symbol", "")
+                cg_id = top.get("cg_id", "")
+                if sym not in TOKENS and not token_cache.get(cg_id):
+                    return True, f"{sym} needs get_token_info (no cached address)"
+
+        # Periodic review every 6h when positions are open
+        if open_pos and (time.time() - self._last_claude_review_ts) >= 6 * 3600:
+            return True, f"periodic 6h review ({len(open_pos)} open position(s))"
+
+        # Signal deterioration on held positions
+        sig_exits = snapshot.get("_signal_exit_suggestions", [])
+        if sig_exits:
+            return True, f"signal deterioration on held position"
+
+        return False, "no review needed"
+
+    def _build_lean_context(
+        self,
+        snapshot: dict,
+        scored: list[dict],
+        reason: str,
+        auto_executed: dict | None,
+    ) -> str:
+        """
+        Build a compact ~500-token context for Claude review calls.
+        Replaces the 18k-token full market prompt for most ticks.
+        """
+        total_usd = snapshot.get("total_usd", 0)
+        usdc_bal  = snapshot.get("holdings", {}).get("USDC", {}).get("value_usd", 0)
+        fg_val    = snapshot.get("fear_and_greed", {}).get("value", 50)
+        btc_ind   = history.get_indicators("cbBTC")
+        regime_obj = history.get_market_regime(btc_ind, fg_val)
+        regime    = regime_obj["regime"]
+
+        cap        = capital.get_summary(total_usd, usdc_bal)
+        open_pos   = positions.get_position_summary(snapshot.get("prices", {}))
+        allowed, allow_reason = risk.can_open_trade(
+            total_usd, len(open_pos), regime_label=regime
+        )
+
+        lines = [
+            f"=== REVIEW MODE — {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')} UTC ===",
+            f"Portfolio: ${total_usd:.0f} | USDC: ${usdc_bal:.0f} | Regime: {regime} | F&G: {fg_val}",
+            f"Trade: {'allowed' if allowed else 'BLOCKED — ' + allow_reason} | "
+            f"Size: ${cap['min_trade']:.0f}–${cap['max_trade']:.0f} | Recovery: {'YES' if cap['in_recovery'] else 'no'}",
+        ]
+
+        if open_pos:
+            lines.append("\n=== OPEN POSITIONS ===")
+            for p in open_pos:
+                tp  = p.get("take_profit_price")
+                sl  = p.get("stop_loss_price")
+                tp_s = f"TP=${tp:.4f}" if tp else "no TP"
+                sl_s = f"SL=${sl:.4f}" if sl else "no SL"
+                lines.append(
+                    f"  {p['symbol']}: {p['amount_tokens']:.4f} @ ${p['entry_price']:.4f} "
+                    f"→ ${p['current_price']:.4f} | {p['gain_loss_pct']:+.1f}% "
+                    f"(${p['gain_loss_usd']:+.2f}) | held {p['hold_days']}d | {tp_s} {sl_s}"
+                )
+
+        lines.append(f"\n=== WHY YOU WERE CALLED ===\n{reason}")
+
+        if auto_executed:
+            sig = auto_executed["signal"]
+            lines.append(
+                f"\n=== AUTO-EXECUTED THIS TICK (no action needed unless you disagree) ===\n"
+                f"Bought {auto_executed['symbol']} score={sig['score']}/100 "
+                f"TP={sig.get('target_pct','?')}% SL={sig.get('stop_pct','?')}%"
+            )
+        else:
+            lines.append("\n=== AUTO-EXECUTE ===\nNo auto-execution this tick (top score below threshold or blocked).")
+
+        # Show top signals (scored ≥ 45)
+        near = [s for s in scored if s["signal"]["score"] >= 45][:5]
+        if near:
+            lines.append("\n=== TOP SIGNALS ===")
+            for s in near:
+                sig     = s["signal"]
+                tag     = "AUTO-EXECUTED" if s.get("auto_executed") else (
+                    "above threshold" if sig["score"] >= AUTO_EXEC_THRESHOLD else "BORDERLINE"
+                )
+                stop_s   = f"{sig['stop_pct']}%" if sig.get("stop_pct") else "n/a"
+                target_s = f"{sig['target_pct']}%" if sig.get("target_pct") else "n/a"
+                lines.append(
+                    f"  {s['symbol']} score={sig['score']}/100 [{tag}] | "
+                    f"RSI={sig.get('rsi','?')} ATR={sig.get('atr_pct','?')}% | "
+                    f"stop={stop_s} target={target_s} | cg_id:{s.get('cg_id','')}"
+                )
+                for cond in sig.get("conditions", []):
+                    lines.append(f"    {cond}")
+        else:
+            best = scored[0]["signal"]["score"] if scored else 0
+            lines.append(f"\n=== SIGNALS ===\nNo candidates scored ≥45 (best: {best}/100)")
+
+        # Signal deterioration on held positions
+        sig_exits = snapshot.get("_signal_exit_suggestions", [])
+        if sig_exits:
+            lines.append("\n=== SIGNAL DETERIORATION ===")
+            for sug in sig_exits:
+                lines.append(f"  {sug}")
+
+        lines.append(
+            "\n=== AVAILABLE TOOLS ===\n"
+            "execute_swap, add_knowledge, get_token_info (only if token address unknown)"
+        )
+
+        return "\n".join(lines)
 
     def run_once(self):
         logger.info("Agent tick: fetching portfolio snapshot...")
@@ -1200,9 +1481,39 @@ class TradingAgent:
                     "fear_greed":     fg_val,
                 }, _f)
 
-        market_context = self._build_market_prompt(snapshot)
+        # Score candidates here (outside _build_market_prompt) so auto-execute
+        # can run before any Claude call, and to avoid double-scoring.
+        _fg_val  = context.get("fear_and_greed", {}).get("value", 50)
+        _btc_ind = history.get_indicators("cbBTC")
+        _regime  = history.get_market_regime(_btc_ind, _fg_val)
+        _scored  = []
+        if snapshot.get("base_ecosystem"):
+            _top_by_vol = sorted(
+                snapshot["base_ecosystem"],
+                key=lambda c: c.get("volume_24h", 0),
+                reverse=True,
+            )
+            _scored = _score_candidates(_top_by_vol, _regime["regime"])
+            self.last_best_signal_score = _scored[0]["signal"]["score"] if _scored else 0
 
-        # Two-tier model: Haiku for quiet markets, Sonnet when signals are active
+        # ── Mechanical entry: buy best qualifying signal without Claude ──────────
+        auto_executed = self._auto_execute(snapshot, _scored)
+
+        # ── Decide whether Claude review is needed ───────────────────────────────
+        needs_review, review_reason = self._needs_claude_review(snapshot, _scored, auto_executed)
+
+        if not needs_review:
+            logger.info(
+                f"Skipping Claude — no review needed | "
+                f"auto_executed={auto_executed.get('symbol') if auto_executed else None} | "
+                f"best_score={self.last_best_signal_score}"
+            )
+            return
+
+        # Build lean context (~500 tokens) instead of full market prompt
+        lean_context = self._build_lean_context(snapshot, _scored, review_reason, auto_executed)
+
+        # Model selection: Haiku for most reviews, Sonnet for open-position crises
         active = self._is_market_active(snapshot)
 
         # Budget guard — force Haiku when >80% of monthly budget is consumed
@@ -1214,23 +1525,9 @@ class TradingAgent:
             active = False
 
         model = "claude-sonnet-4-6" if active else "claude-haiku-4-5-20251001"
-        logger.info(f"Using model: {model} (market active: {active}, monthly: ${spent:.2f}/${budget:.2f})")
+        logger.info(f"Claude review: {review_reason} | model={model} | monthly=${spent:.2f}/{budget:.2f}")
 
-        # Skip Claude entirely when there is nothing actionable:
-        # no open positions to manage + no signal near the entry threshold.
-        # The screener and signal scoring still ran (dashboard needs them),
-        # but there is no decision to make so the API call adds zero value.
-        open_positions = positions.get_open_positions()
-        has_open = any(lots for lots in open_positions.values())
-        best_score = self.last_best_signal_score
-        if not has_open and best_score < 45:
-            logger.info(
-                f"No positions + best signal {best_score}/100 — skipping Claude API call. "
-                f"Resuming when score ≥ 45 or a position opens."
-            )
-            return
-
-        messages = [{"role": "user", "content": market_context}]
+        messages = [{"role": "user", "content": lean_context}]
 
         try:
             response = self.client.messages.create(
@@ -1284,6 +1581,9 @@ class TradingAgent:
         cost = (input_tokens * ir + output_tokens * or_) / 1_000_000
         logger.info(f"Tokens: {input_tokens} in / {output_tokens} out | Est. cost: ${cost:.4f}")
         record_anthropic(cost, model)
+
+        # Record timestamp so _needs_claude_review can throttle periodic reviews
+        self._last_claude_review_ts = time.time()
 
         # Log final reasoning — strip emoji that crash Windows cp1252 terminal
         for block in response.content:

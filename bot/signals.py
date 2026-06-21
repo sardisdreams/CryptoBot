@@ -1,12 +1,12 @@
 """
-Trade signal engine — scores a candidate 0-100 using real daily OHLCV candles.
-Score >= 60 means the setup is tradeable.
+Trade signal engine — scores a candidate 0-100 using 4h OHLCV candles.
+Score >= 50 means the setup is tradeable (auto-execute at >=55).
 Stop and target are ATR-based (replaces fixed %) giving minimum 2:1 risk/reward.
 
 Six conditions (total 100 pts):
-  1. Trend    (25) — price above EMA50 daily
+  1. Trend    (25) — price above EMA50 (4h, ~8 days of context)
   2. RSI      (20) — 14-period RSI in 35-65 zone
-  3. Dip      (15) — 5-25% pullback from 20-day high
+  3. Dip      (15) — 3-12% pullback from 20-period (3.3d) high
   4. Momentum (15) — price > SMA10 > SMA20
   5. Macro    (15) — BTC regime
   6. Vol      (10) — ATR < 12% of price
@@ -27,7 +27,7 @@ def score_entry(cg_id: str, symbol: str, current_price: float, btc_regime: str) 
     stop_price, target_price, and human-readable conditions list.
     """
     candles = get_candles(cg_id)
-    if len(candles) < 30:
+    if len(candles) < 20:  # need at least 20 4h candles (~3.3 days)
         return _no_data(symbol, cg_id)
 
     closes = [c["close"] for c in candles]
@@ -60,26 +60,27 @@ def score_entry(cg_id: str, symbol: str, current_price: float, btc_regime: str) 
         else:
             conditions.append(f"✗ RSI {rsi:.0f} — weak / selling pressure")
 
-    # ── 3. DIP ENTRY: 5-25% below 20-day high, but not near 5-day high (15 pts) ──
-    high_20d    = max(highs[-20:]) if len(highs) >= 20 else max(highs)
-    high_5d     = max(highs[-5:])  if len(highs) >= 5  else max(highs)
-    pullback_20 = (high_20d - current_price) / high_20d * 100 if high_20d > 0 else 0
-    pullback_5  = (high_5d  - current_price) / high_5d  * 100 if high_5d  > 0 else 0
-    if 5 <= pullback_20 <= 25:
-        if pullback_5 < 3:
-            # Price is near/at the 5-day high — not a fresh dip, just at recent resistance
+    # ── 3. DIP ENTRY: 3-12% below 20-period high, not at 5-period (20h) high (15 pts) ──
+    # Periods are 4h candles: 20p = 3.3 days, 5p = 20 hours
+    high_20p    = max(highs[-20:]) if len(highs) >= 20 else max(highs)
+    high_5p     = max(highs[-5:])  if len(highs) >= 5  else max(highs)
+    pullback_20 = (high_20p - current_price) / high_20p * 100 if high_20p > 0 else 0
+    pullback_5  = (high_5p  - current_price) / high_5p  * 100 if high_5p  > 0 else 0
+    if 3 <= pullback_20 <= 12:
+        if pullback_5 < 2:
+            # Price is near/at the 20h high — at recent resistance, not a fresh dip
             score += 5
             conditions.append(
-                f"~ {pullback_20:.1f}% off 20d high but only {pullback_5:.1f}% off 5d high "
+                f"~ {pullback_20:.1f}% off 20p high but only {pullback_5:.1f}% off 5p high "
                 f"— price at recent top, not a clean dip entry"
             )
         else:
             score += 15
-            conditions.append(f"✓ {pullback_20:.1f}% below 20d high, {pullback_5:.1f}% below 5d high — healthy dip")
-    elif pullback_20 < 5:
-        conditions.append(f"✗ Only {pullback_20:.1f}% off 20d high — chasing, poor R/R")
+            conditions.append(f"✓ {pullback_20:.1f}% below 20p high, {pullback_5:.1f}% below 5p high — healthy dip")
+    elif pullback_20 < 3:
+        conditions.append(f"✗ Only {pullback_20:.1f}% off 20p high — chasing, poor R/R")
     else:
-        conditions.append(f"✗ {pullback_20:.1f}% below 20d high — too damaged")
+        conditions.append(f"✗ {pullback_20:.1f}% below 20p high — too damaged for 4h entry")
 
     # ── 4. MOMENTUM: price > SMA10 > SMA20 (15 pts) ──────────────────────────
     sma10 = _sma(closes, 10)
@@ -151,7 +152,7 @@ def score_candidates(candidates: list[dict], btc_regime: str) -> list[dict]:
     """
     Score a list of screener candidates. Returns list sorted by score descending.
     Adds a 'signal' key to each candidate dict.
-    OHLCV is cached 4h per token so subsequent ticks are fast.
+    OHLCV is cached 1h per token so subsequent ticks are fast.
     """
     to_score   = [c for c in candidates if c.get("cg_id") and c.get("price", 0) > 0]
     skip       = [c for c in candidates if c not in to_score]
@@ -256,5 +257,5 @@ def _no_data(symbol: str, cg_id: str) -> dict:
         "stop_price": None, "target_price": None,
         "stop_pct": None, "target_pct": None,
         "rsi": None, "ema50": None, "atr_pct": None,
-        "conditions": ["insufficient daily OHLCV data (< 30 candles)"],
+        "conditions": ["insufficient 4h OHLCV data (< 20 candles)"],
     }

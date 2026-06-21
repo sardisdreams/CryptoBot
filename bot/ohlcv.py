@@ -1,6 +1,7 @@
 """
-Daily OHLCV cache — fetches real candle data from CoinGecko for signal calculations.
-Refreshed every 4 hours per token; stale cache returned on API failure.
+4h OHLCV cache — fetches 4h candle data from CoinGecko for signal calculations.
+Refreshed every 1 hour per token; stale cache returned on API failure.
+days=14 → 4h granularity on CoinGecko (6 candles/day × 14 days ≈ 84 candles).
 """
 import json
 import os
@@ -10,15 +11,15 @@ import requests
 from datetime import datetime, timezone
 
 OHLCV_FILE          = "data/ohlcv_cache.json"
-CACHE_MAX_AGE_HOURS = 4
+CACHE_MAX_AGE_HOURS = 1
 _RATE_LIMIT_SLEEP   = 1.2   # seconds between CoinGecko calls
 
 
-def get_candles(cg_id: str, days: int = 365) -> list[dict]:
+def get_candles(cg_id: str, days: int = 14) -> list[dict]:
     """
-    Return daily OHLCV candles for cg_id, oldest first.
-    Uses cache if < 4h old; returns stale cache on fetch failure.
-    days=365 → daily granularity (CoinGecko returns daily for days >= 90).
+    Return 4h OHLCV candles for cg_id, oldest first.
+    Uses cache if < 1h old; returns stale cache on fetch failure.
+    days=14 → 4h granularity on CoinGecko (≈84 candles, enough for EMA50).
     """
     cache = _load()
     entry = cache.get(cg_id, {})
