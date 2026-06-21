@@ -836,6 +836,20 @@ class TradingAgent:
             logger.info(f"Trade blocked: confidence {confidence}/10 below threshold (6). Holding cash.")
             return f"Trade skipped: confidence score {confidence}/10 is below the minimum threshold of 6. Conditions are unclear — holding cash is the right call."
 
+        # RSI guard — same rule as auto-execute: overbought entries in BEAR/STRONG_BEAR
+        # are fade setups, not momentum entries. Consistent with the mechanical path.
+        if is_buy:
+            _fg_buy   = snapshot.get("fear_and_greed", {}).get("value", 50)
+            _btc_buy  = history.get_indicators("cbBTC")
+            _reg_buy  = history.get_market_regime(_btc_buy, _fg_buy)
+            _ind_buy  = history.get_indicators(token_out_sym)
+            _rsi_buy  = _ind_buy.get("rsi_14")  # None if insufficient tick history
+            if _rsi_buy and _rsi_buy > 70 and _reg_buy["regime"] in ("BEAR", "STRONG_BEAR"):
+                msg = (f"{token_out_sym} RSI={_rsi_buy:.0f} is overbought in {_reg_buy['regime']} regime — "
+                       f"waiting for RSI to cool below 70 before entering")
+                _log_trade_block(token_in_sym, token_out_sym, amount_usd, msg)
+                return msg
+
         # ETH alias
         if token_in_sym == "ETH":  token_in_sym = "WETH"
         if token_out_sym == "ETH": token_out_sym = "WETH"
@@ -1090,6 +1104,19 @@ class TradingAgent:
                 return None
             trade_usd = min(trade_usd, remaining)
 
+        # Cap trade to 98% of available USDC — computed once before the loop so all
+        # candidates get the same effective budget regardless of prior swap failures.
+        usdc_limit = usdc_bal * 0.98
+        if trade_usd > usdc_limit:
+            trade_usd = usdc_limit
+        if trade_usd < cap["min_trade"]:
+            logger.info(f"Auto-execute: insufficient USDC (${usdc_bal:.2f})")
+            return None
+
+        # Load open positions once — the dict doesn't change within the loop (auto-execute
+        # only ever attempts one buy per tick and exits immediately on success).
+        already_held = positions.get_open_positions()
+
         for candidate in scored:
             sig   = candidate["signal"]
             score = sig["score"]
@@ -1122,8 +1149,7 @@ class TradingAgent:
                 continue
 
             # Don't auto-stack an existing position — let Claude decide on adds
-            open_positions = positions.get_open_positions()
-            if open_positions.get(sym):
+            if already_held.get(sym):
                 logger.info(f"Auto-execute: already hold {sym} — skipping (Claude can add if warranted)")
                 continue
 
@@ -1140,14 +1166,6 @@ class TradingAgent:
             if not token_info:
                 logger.info(f"Auto-execute: {sym} has no cached address — Claude must call get_token_info first")
                 continue
-
-            # Cap trade to 98% of available USDC
-            usdc_limit = usdc_bal * 0.98
-            if trade_usd > usdc_limit:
-                trade_usd = usdc_limit
-            if trade_usd < cap["min_trade"]:
-                logger.info(f"Auto-execute: insufficient USDC (${usdc_bal:.2f})")
-                return None
 
             usdc_info = TOKENS["USDC"]
             trade_wei = int(trade_usd * (10 ** usdc_info["decimals"]))
@@ -1326,6 +1344,23 @@ class TradingAgent:
             lines.append("\n=== SIGNAL DETERIORATION ===")
             for sug in sig_exits:
                 lines.append(f"  {sug}")
+
+        # Knowledge base — filter to entries mentioning held or candidate tokens
+        held_syms = {p["symbol"] for p in open_pos}
+        candidate_syms = {s["symbol"] for s in scored if s["signal"]["score"] >= 45}
+        relevant_syms = held_syms | candidate_syms
+        kb_all = knowledge.get_all()
+        # Flatten all entries with category label, then filter by symbol relevance
+        flat = [(cat, e) for cat, entries in kb_all.items() for e in entries]
+        if flat:
+            relevant = [(cat, e) for cat, e in flat
+                        if any(s.lower() in e.get("content", "").lower() for s in relevant_syms)]
+            if not relevant:
+                relevant = flat[-5:]  # last 5 entries if nothing symbol-specific
+            if relevant:
+                lines.append("\n=== KNOWLEDGE BASE (your prior observations) ===")
+                for cat, e in relevant[-10:]:  # cap at 10 to stay lean
+                    lines.append(f"  [{cat}] {e.get('content','')}")
 
         lines.append(
             "\n=== AVAILABLE TOOLS ===\n"
@@ -1573,6 +1608,11 @@ class TradingAgent:
                 return  # skip this tick; next tick will retry after the interval
             raise
 
+        # Record now — before the tool loop which can also raise. Any exception after the
+        # first successful response still counts as a review attempt; leaving this at 0
+        # would trigger Claude every tick while the error persists.
+        self._last_claude_review_ts = time.time()
+
         # Agentic loop — handle tool calls until model stops
         while response.stop_reason == "tool_use":
             tool_results = []
@@ -1607,9 +1647,6 @@ class TradingAgent:
         cost = (input_tokens * ir + output_tokens * or_) / 1_000_000
         logger.info(f"Tokens: {input_tokens} in / {output_tokens} out | Est. cost: ${cost:.4f}")
         record_anthropic(cost, model)
-
-        # Record timestamp so _needs_claude_review can throttle periodic reviews
-        self._last_claude_review_ts = time.time()
 
         # Log final reasoning — strip emoji that crash Windows cp1252 terminal
         for block in response.content:
