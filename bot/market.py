@@ -98,8 +98,16 @@ class Market:
                 sym = id_to_sym.get(cg_id)
                 if not sym:
                     continue
+                price = coin.get("current_price") or 0.0
+                # Never write a zero price for a known token — CoinGecko occasionally
+                # returns null/0 during brief outages. Fall back to last cached price so
+                # both snapshot["prices"] and context["prices"] (which share this cache)
+                # stay valid rather than simultaneously zeroing out.
+                if price <= 0 and _MARKET_CACHE.get(sym, {}).get("price", 0) > 0:
+                    price = _MARKET_CACHE[sym]["price"]
+                    logger.warning(f"CoinGecko returned $0 for {sym} — keeping last known ${price:,.2f}")
                 result[sym] = {
-                    "price":        coin.get("current_price", 0.0),
+                    "price":        price,
                     "change_1h":    coin.get("price_change_percentage_1h_in_currency", 0.0),
                     "change_24h":   coin.get("price_change_percentage_24h", 0.0),
                     "volume_24h":   coin.get("total_volume", 0.0),
@@ -133,7 +141,15 @@ class Market:
 
     def get_all_prices(self) -> dict[str, float]:
         data = self.get_market_data()
-        prices = {sym: d["price"] for sym, d in data.items()} if data else {sym: 0.0 for sym in TOKENS}
+        prices = {sym: d["price"] for sym, d in data.items()} if data else {}
+        # Back-fill any registry token missing from the response with its last cache price.
+        # A token can be absent (not zeroed) if CoinGecko omits it during a partial outage.
+        for sym in COINGECKO_IDS:
+            if sym not in prices or prices[sym] <= 0:
+                cached_price = _MARKET_CACHE.get(sym, {}).get("price", 0)
+                if cached_price > 0:
+                    prices[sym] = cached_price
+                    logger.warning(f"{sym} missing from CoinGecko response — using cached ${cached_price:,.2f}")
         # Stablecoins are always $1 — API rate limits must never zero them out
         for sym in STABLECOINS:
             prices[sym] = 1.0
