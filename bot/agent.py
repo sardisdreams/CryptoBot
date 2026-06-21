@@ -941,6 +941,15 @@ class TradingAgent:
         # and execution, and full-position sells must always be allowed through.
         holding = snapshot["holdings"].get(token_in_sym, {})
         available_usd = holding.get("value_usd", 0)
+        # If value_usd is 0 but token balance exists, recalculate from live price.
+        # This handles WETH and other tokens whose portfolio value can read as $0
+        # when the snapshot price map is populated after the holdings snapshot.
+        if available_usd <= 0 and holding.get("balance", 0) > 0 and price_in > 0:
+            available_usd = holding["balance"] * price_in
+            logger.info(
+                f"Recalculated {token_in_sym} balance: "
+                f"{holding['balance']:.6f} × ${price_in:.2f} = ${available_usd:.2f}"
+            )
         limit = available_usd * 1.05 if is_buy is False else available_usd * 0.98
         if amount_usd > limit:
             msg = f"Insufficient balance: have ${available_usd:.2f} of {token_in_sym}, need ${amount_usd:.2f}"
@@ -1331,6 +1340,13 @@ class TradingAgent:
         for sym, price in snapshot["prices"].items():
             if sym not in context["prices"]:
                 context["prices"][sym] = price
+        # Reverse sync: fill any zero-price registry tokens in snapshot from context.
+        # WETH and cbBTC can occasionally read as $0 from portfolio.get_snapshot()
+        # if the price feed had a transient miss; context["prices"] from
+        # market.get_full_context() is more reliably populated.
+        for sym, price in context["prices"].items():
+            if price > 0 and snapshot["prices"].get(sym, 0) <= 0:
+                snapshot["prices"][sym] = price
 
         # Record prices to build up history for technical indicators
         history.record_prices(context["prices"])
