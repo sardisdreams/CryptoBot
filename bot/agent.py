@@ -1111,6 +1111,16 @@ class TradingAgent:
                 logger.info(f"Auto-execute: {sym} in stopout cooldown — {cooldown_reason}")
                 continue
 
+            # Block overbought entries in BEAR/STRONG_BEAR regime — RSI >70 on 4h is
+            # a fade setup, not a momentum entry. Let Claude decide on these borderline cases.
+            rsi = sig.get("rsi")
+            if rsi and rsi > 70 and regime["regime"] in ("BEAR", "STRONG_BEAR"):
+                logger.info(
+                    f"Auto-execute: {sym} RSI={rsi:.0f} overbought in {regime['regime']} — "
+                    f"defer to Claude"
+                )
+                continue
+
             # Don't auto-stack an existing position — let Claude decide on adds
             open_positions = positions.get_open_positions()
             if open_positions.get(sym):
