@@ -188,46 +188,23 @@ class AerodromeRouter:
         min_out   = int(amount_out * (1 - slip))
         deadline  = int(time.time()) + 300
         gas_price = self.w3.eth.gas_price
-        is_native_eth_in  = token_in.lower()  == WETH_ADDRESS.lower()
-        is_native_eth_out = token_out.lower() == WETH_ADDRESS.lower()
 
-        if not is_native_eth_in:
-            self._ensure_approval(token_in, amount_in_wei)
+        # WETH on Base is an ERC-20 (the bot always wraps native ETH via wrap_eth()
+        # before swapping). All swaps go through swapExactTokensForTokens with prior
+        # ERC-20 approval — never through the native ETH path.
+        self._ensure_approval(token_in, amount_in_wei)
 
         try:
-            if is_native_eth_in:
-                tx = self.router.functions.swapExactETHForTokens(
-                    min_out, routes, self.wallet.address, deadline
-                ).build_transaction({
-                    "from": self.wallet.address,
-                    "value": amount_in_wei,
-                    "gas": GAS_LIMIT,
-                    "gasPrice": gas_price,
-                    "nonce": self.wallet.get_nonce(),
-                    "chainId": BASE_CHAIN_ID,
-                })
-            elif is_native_eth_out:
-                tx = self.router.functions.swapExactTokensForETH(
-                    amount_in_wei, min_out, routes, self.wallet.address, deadline
-                ).build_transaction({
-                    "from": self.wallet.address,
-                    "value": 0,
-                    "gas": GAS_LIMIT,
-                    "gasPrice": gas_price,
-                    "nonce": self.wallet.get_nonce(),
-                    "chainId": BASE_CHAIN_ID,
-                })
-            else:
-                tx = self.router.functions.swapExactTokensForTokens(
-                    amount_in_wei, min_out, routes, self.wallet.address, deadline
-                ).build_transaction({
-                    "from": self.wallet.address,
-                    "value": 0,
-                    "gas": GAS_LIMIT,
-                    "gasPrice": gas_price,
-                    "nonce": self.wallet.get_nonce(),
-                    "chainId": BASE_CHAIN_ID,
-                })
+            tx = self.router.functions.swapExactTokensForTokens(
+                amount_in_wei, min_out, routes, self.wallet.address, deadline
+            ).build_transaction({
+                "from": self.wallet.address,
+                "value": 0,
+                "gas": GAS_LIMIT,
+                "gasPrice": gas_price,
+                "nonce": self.wallet.get_nonce(),
+                "chainId": BASE_CHAIN_ID,
+            })
 
             logger.info(f"Aerodrome swap: {amount_in_wei} {token_in} -> {token_out}")
             return self.wallet.sign_and_send(tx)
