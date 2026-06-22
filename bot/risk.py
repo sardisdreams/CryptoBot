@@ -112,7 +112,11 @@ def check_daily_drawdown(current_usd: float) -> tuple[bool, str]:
 
 def check_win_rate() -> tuple[bool, str]:
     """Return (ok, reason). ok=False means pause new entries."""
-    trades = _load_recent_trades(WIN_RATE_LOOKBACK)
+    # WETH/ETH trades are excluded — those losses came from untracked lots reconstructed
+    # after downtime, not the current signal-based system. Mixing them in distorts the
+    # win rate for altcoin momentum trades which is what this guard is designed to measure.
+    all_trades = _load_recent_trades(WIN_RATE_LOOKBACK * 3)
+    trades = [t for t in all_trades if t.get("token", "").upper() not in {"WETH", "ETH"}][-WIN_RATE_LOOKBACK:]
     if len(trades) < WIN_RATE_LOOKBACK:
         return True, ""
     wins = sum(1 for t in trades if float(t.get("gain_loss_pct", 0)) >= 0)
