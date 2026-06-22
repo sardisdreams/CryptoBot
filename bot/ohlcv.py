@@ -24,7 +24,7 @@ def get_candles(cg_id: str, days: int = 14) -> list[dict]:
     cache = _load()
     entry = cache.get(cg_id, {})
 
-    if _is_fresh(entry.get("cached_at")):
+    if _is_fresh(entry.get("cached_at")) and entry.get("days") == days:
         return entry.get("candles", [])
 
     time.sleep(_RATE_LIMIT_SLEEP)
@@ -32,6 +32,7 @@ def get_candles(cg_id: str, days: int = 14) -> list[dict]:
     if candles:
         cache[cg_id] = {
             "candles":   candles,
+            "days":      days,
             "cached_at": datetime.now(timezone.utc).isoformat(),
         }
         _save(cache)

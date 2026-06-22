@@ -24,8 +24,10 @@ def _load() -> dict:
 
 def _save(data: dict):
     os.makedirs("data", exist_ok=True)
-    with open(CAPITAL_FILE, "w") as f:
+    tmp = CAPITAL_FILE + ".tmp"
+    with open(tmp, "w") as f:
         json.dump(data, f, indent=2)
+    os.replace(tmp, CAPITAL_FILE)
 
 
 def get_floor() -> float:

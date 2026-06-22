@@ -836,6 +836,10 @@ class TradingAgent:
             logger.info(f"Trade blocked: confidence {confidence}/10 below threshold (6). Holding cash.")
             return f"Trade skipped: confidence score {confidence}/10 is below the minimum threshold of 6. Conditions are unclear — holding cash is the right call."
 
+        # ETH alias — must happen before RSI guard so get_indicators uses "WETH" not "ETH"
+        if token_in_sym == "ETH":  token_in_sym = "WETH"
+        if token_out_sym == "ETH": token_out_sym = "WETH"
+
         # RSI guard — same rule as auto-execute: overbought entries in BEAR/STRONG_BEAR
         # are fade setups, not momentum entries. Consistent with the mechanical path.
         if is_buy:
@@ -849,10 +853,6 @@ class TradingAgent:
                        f"waiting for RSI to cool below 70 before entering")
                 _log_trade_block(token_in_sym, token_out_sym, amount_usd, msg)
                 return msg
-
-        # ETH alias
-        if token_in_sym == "ETH":  token_in_sym = "WETH"
-        if token_out_sym == "ETH": token_out_sym = "WETH"
 
         # Resolve token_in — known registry or custom address
         if token_in_sym in TOKENS:
@@ -1124,7 +1124,7 @@ class TradingAgent:
                 break
 
             sym   = candidate.get("symbol", "")
-            cg_id = candidate.get("cg_id", "")
+            cg_id = candidate.get("cg_id") or ""
             price = candidate.get("price", 0)
 
             if price <= 0:

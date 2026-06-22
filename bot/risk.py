@@ -202,8 +202,10 @@ def _save_snapshots(data: dict):
     if len(data) > 30:
         oldest = sorted(data.keys())[0]
         del data[oldest]
-    with open(PORTFOLIO_SNAPSHOT_FILE, "w") as f:
+    tmp = PORTFOLIO_SNAPSHOT_FILE + ".tmp"
+    with open(tmp, "w") as f:
         json.dump(data, f, indent=2)
+    os.replace(tmp, PORTFOLIO_SNAPSHOT_FILE)
 
 
 def _load_cooldowns() -> dict:
@@ -215,8 +217,10 @@ def _load_cooldowns() -> dict:
 
 def _save_cooldowns(data: dict):
     os.makedirs("data", exist_ok=True)
-    with open(COOLDOWN_FILE, "w") as f:
+    tmp = COOLDOWN_FILE + ".tmp"
+    with open(tmp, "w") as f:
         json.dump(data, f, indent=2)
+    os.replace(tmp, COOLDOWN_FILE)
 
 
 def _load_recent_trades(n: int) -> list[dict]:

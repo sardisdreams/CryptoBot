@@ -29,8 +29,10 @@ def _load() -> dict:
 
 def _save(data: dict):
     os.makedirs("data", exist_ok=True)
-    with open(KNOWLEDGE_FILE, "w") as f:
+    tmp = KNOWLEDGE_FILE + ".tmp"
+    with open(tmp, "w") as f:
         json.dump(data, f, indent=2)
+    os.replace(tmp, KNOWLEDGE_FILE)
 
 
 def add_entry(category: str, content: str) -> str:

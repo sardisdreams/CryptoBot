@@ -18,8 +18,10 @@ def _load() -> dict:
 
 def _save(data: dict):
     os.makedirs("data", exist_ok=True)
-    with open(CACHE_FILE, "w") as f:
+    tmp = CACHE_FILE + ".tmp"
+    with open(tmp, "w") as f:
         json.dump(data, f, indent=2)
+    os.replace(tmp, CACHE_FILE)
 
 
 def get(cg_id: str) -> dict | None:

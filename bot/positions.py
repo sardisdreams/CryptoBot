@@ -188,7 +188,10 @@ def raise_take_profit(symbol: str, lot_id: str, multiplier: float = 1.5):
             lot["take_profit_pct"]   = round(
                 (lot["take_profit_price"] / lot["entry_price_usd"] - 1) * 100, 2
             )
-    all_positions[symbol] = lots
+    if lots:
+        all_positions[symbol] = lots
+    elif symbol in all_positions:
+        del all_positions[symbol]
     _save(all_positions)
 
 

@@ -313,7 +313,7 @@ class Executor:
         # (calling approve or transferring) can drain the wallet via malicious contracts.
         if is_sell and token_in_symbol not in {"WETH", "cbBTC", "cbETH"}:
             open_pos = positions.get_open_positions()
-            if token_in_symbol not in open_pos:
+            if not open_pos.get(token_in_symbol):
                 msg = f"Dusting protection: {token_in_symbol} not in tracked positions — refusing sell"
                 logger.warning(msg)
                 _log_swap_block(token_in_symbol, token_out_symbol, _amt_usd_approx, msg)

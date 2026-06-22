@@ -38,13 +38,15 @@ def score_entry(cg_id: str, symbol: str, current_price: float, btc_regime: str) 
 
     # ── 1. TREND: price above EMA50 (25 pts) ──────────────────────────────────
     ema50 = _ema(closes, 50)
-    if ema50:
+    if ema50 is not None:
         if current_price > ema50:
             score += 25
             conditions.append(f"✓ Above EMA50 ${ema50:.4f} — uptrend intact")
         else:
             gap = (ema50 - current_price) / ema50 * 100
             conditions.append(f"✗ {gap:.1f}% below EMA50 ${ema50:.4f} — downtrend, skip")
+    else:
+        conditions.append("✗ Insufficient candles for EMA50 — trend unscored")
 
     # ── 2. RSI: 35-65 zone (20 pts) ───────────────────────────────────────────
     rsi = _rsi(closes)
@@ -142,7 +144,7 @@ def score_entry(cg_id: str, symbol: str, current_price: float, btc_regime: str) 
         "stop_pct":     stop_pct,
         "target_pct":   target_pct,
         "rsi":          round(rsi, 1) if rsi is not None else None,
-        "ema50":        round(ema50, 6) if ema50 else None,
+        "ema50":        round(ema50, 6) if ema50 is not None else None,
         "atr_pct":      round(atr_pct, 2) if atr_pct else None,
         "conditions":   conditions,
     }
