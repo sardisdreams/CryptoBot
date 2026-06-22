@@ -340,6 +340,7 @@ class TradingAgent:
         self.current_tier = {"sonnet_threshold": 5.0, "always_sonnet": False, "label": "CONSERVE"}
         self.last_best_signal_score = 0  # set after each tick for adaptive interval
         self._last_claude_review_ts = 0.0  # unix timestamp of last Claude API call
+        self._last_routine_review_ts = 0.0  # unix timestamp of last routine (non-urgent) Claude call
         self.client = anthropic.Anthropic(
             api_key=ANTHROPIC_API_KEY,
             http_client=httpx.Client(verify=certifi.where()),
@@ -1030,9 +1031,10 @@ class TradingAgent:
             logger.info(f"{regime_label} regime — using Haiku (no positions in crisis)")
             return False
 
-        # Near-qualifying signal — worth Sonnet reasoning (score set in run_once before this call)
+        # High-scoring signal that wasn't auto-executed (held token, cooldown, etc.) — Sonnet
+        # Borderline signals (48-54) use Haiku: "ENA at 50, skip" doesn't need Sonnet reasoning
         best_score = getattr(self, "last_best_signal_score", 0)
-        if best_score >= 45:
+        if best_score >= AUTO_EXEC_THRESHOLD:
             logger.info(f"Market active: best signal score {best_score}/100")
             return True
 
@@ -1220,25 +1222,50 @@ class TradingAgent:
         """
         Return (needs_review, reason). Claude is only called when there is a
         genuine decision to make that mechanical execution can't handle.
+
+        Two priority tiers:
+        - URGENT  (no cooldown): position in crisis (±25%+) or signal deterioration
+        - ROUTINE (45min cooldown): ±15-24% watch, borderline signal, hold check,
+                  periodic 6h — same stable condition doesn't need a call every tick
         """
+        ROUTINE_COOLDOWN = 45 * 60  # seconds — ~3 ticks at 15min interval
         open_pos = positions.get_position_summary(snapshot.get("prices", {}))
 
-        # Position at ±15% — needs attention
+        # ── URGENT checks (bypass cooldown) ─────────────────────────────────────
+        # Position in genuine crisis (±25%+): needs immediate attention
         for p in open_pos:
             pnl = p.get("gain_loss_pct", 0)
-            if abs(pnl) >= 15:
-                return True, f"position {p['symbol']} at {pnl:+.1f}%"
+            if abs(pnl) >= 25:
+                return True, f"position {p['symbol']} at {pnl:+.1f}% (urgent)"
 
-        # Position held >= 2 days — periodic check
-        for p in open_pos:
-            if p.get("hold_days", 0) >= 2:
-                return True, f"position {p['symbol']} held {p['hold_days']}d"
+        # Signal deterioration — exit conditions may be developing
+        sig_exits = snapshot.get("_signal_exit_suggestions", [])
+        if sig_exits:
+            return True, "signal deterioration on held position"
+
+        # ── ROUTINE checks (respect cooldown) ────────────────────────────────────
+        routine_ok = (time.time() - self._last_routine_review_ts) >= ROUTINE_COOLDOWN
+
+        # Position at ±15% — watch zone but not a crisis; rate-limit to ROUTINE_COOLDOWN
+        if routine_ok:
+            for p in open_pos:
+                pnl = p.get("gain_loss_pct", 0)
+                if abs(pnl) >= 15:
+                    return True, f"position {p['symbol']} at {pnl:+.1f}%"
+
+        # Position held >= 2 days — routine health check
+        if routine_ok:
+            for p in open_pos:
+                if p.get("hold_days", 0) >= 2:
+                    return True, f"position {p['symbol']} held {p['hold_days']}d"
 
         # Borderline signal (48 <= score < AUTO_EXEC_THRESHOLD) — judgment call
-        borderline = [s for s in scored if 48 <= s["signal"]["score"] < AUTO_EXEC_THRESHOLD]
-        if borderline:
-            top = borderline[0]
-            return True, f"borderline signal {top.get('symbol','?')} score={top['signal']['score']}"
+        # Rate-limited: same ENA at 50 every tick doesn't need Haiku every tick
+        if routine_ok:
+            borderline = [s for s in scored if 48 <= s["signal"]["score"] < AUTO_EXEC_THRESHOLD]
+            if borderline:
+                top = borderline[0]
+                return True, f"borderline signal {top.get('symbol','?')} score={top['signal']['score']}"
 
         # Top signal has no cached address — Claude must call get_token_info
         if scored:
@@ -1252,11 +1279,6 @@ class TradingAgent:
         # Periodic review every 6h when positions are open
         if open_pos and (time.time() - self._last_claude_review_ts) >= 6 * 3600:
             return True, f"periodic 6h review ({len(open_pos)} open position(s))"
-
-        # Signal deterioration on held positions
-        sig_exits = snapshot.get("_signal_exit_suggestions", [])
-        if sig_exits:
-            return True, f"signal deterioration on held position"
 
         return False, "no review needed"
 
@@ -1587,6 +1609,12 @@ class TradingAgent:
 
         model = "claude-sonnet-4-6" if active else "claude-haiku-4-5-20251001"
         logger.info(f"Claude review: {review_reason} | model={model} | monthly=${spent:.2f}/{budget:.2f}")
+
+        # Update routine cooldown timestamp — prevents same stable condition from calling
+        # Claude every tick. Urgent reviews (±25%+, signal deterioration) bypass the cooldown
+        # in _needs_claude_review so don't update it here (preserves urgency on next tick too).
+        if "urgent" not in review_reason and "deterioration" not in review_reason:
+            self._last_routine_review_ts = time.time()
 
         messages = [{"role": "user", "content": lean_context}]
 
