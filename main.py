@@ -269,9 +269,9 @@ def _verify_unknown_sells(w3):
 def main():
     validate()
 
-    # Run code audit on every startup — catches regressions before the bot trades
+    # Run tier-1 invariant checks on every startup — zero API cost, ~1 second
     from bot.audit import run_audit
-    audit_failures = run_audit(verbose=False)
+    audit_failures = run_audit(full=False, verbose=False)
     if audit_failures:
         lines = "\n".join(f"  • {f['check']}: {f['detail']}" for f in audit_failures)
         logger.error(f"Code audit FAILED — {len(audit_failures)} invariant(s) violated:\n{lines}")
