@@ -12,8 +12,8 @@ PORTFOLIO_SNAPSHOT_FILE = "data/portfolio_snapshots.json"
 COOLDOWN_FILE          = "data/stopout_cooldowns.json"
 
 DAILY_DRAWDOWN_LIMIT = 0.10   # halt if portfolio drops >10% in a single day
-WIN_RATE_MIN         = 0.40   # pause if win rate < 40% over last 10 closed trades
-WIN_RATE_LOOKBACK    = 10
+WIN_RATE_MIN         = 0.40   # pause if win rate < 40% over last 5 closed trades
+WIN_RATE_LOOKBACK    = 5
 COOLDOWN_MINUTES     = 30     # no re-entry into a token for 30min after stop-out
 
 # Regime multipliers — available USDC is the real constraint; regime only trims slightly

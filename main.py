@@ -19,6 +19,8 @@ from bot.executor import Executor
 from bot.agent import TradingAgent
 from bot.performance import get_tier
 from bot import token_cache
+from bot.cost_tracker import get_summary as get_cost_summary
+from bot.emailer import send_alert
 
 load_dotenv()
 logger = setup_logger("main")
@@ -284,6 +286,27 @@ def main():
 
     logger.info("Trading agent started — interval adapts to performance tier")
 
+    DAILY_COST_ALERT_USD = 0.50   # email if API spend exceeds this in a single day
+    _daily_cost_alerted: set = set()
+
+    def _check_daily_api_cost():
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        if today in _daily_cost_alerted:
+            return
+        cost = get_cost_summary().get("anthropic_today", 0)
+        if cost >= DAILY_COST_ALERT_USD:
+            send_alert(
+                subject=f"CryptoBot: High API spend ${cost:.2f} today",
+                body=(
+                    f"API spend today: ${cost:.2f} (threshold: ${DAILY_COST_ALERT_USD:.2f})\n\n"
+                    f"This may indicate a retry loop or unexpected call pattern.\n"
+                    f"Check logs: journalctl -u cryptobot -n 100 | grep 'Claude review'\n\n"
+                    f"Dashboard: http://143.198.37.28:5000"
+                ),
+            )
+            _daily_cost_alerted.add(today)
+            logger.warning(f"Daily API cost alert sent: ${cost:.2f} today")
+
     def run_and_reschedule():
         """Run one agent tick, then reschedule based on current performance tier."""
         prices = Market().get_all_prices()
@@ -295,6 +318,7 @@ def main():
         _alert_file = "data/credit_alert.json"
         if os.path.exists(_alert_file):
             os.remove(_alert_file)
+        _check_daily_api_cost()
 
         # Adaptive interval: if a near-miss opportunity exists (score ≥ 45 but below entry
         # threshold), check back in 30min even if the tier normally waits longer.

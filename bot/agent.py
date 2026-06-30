@@ -326,7 +326,18 @@ TOOLS = [
             },
             "required": ["category", "content"],
         },
+        "cache_control": {"type": "ephemeral", "ttl": "1h"},
     },
+]
+
+# Wrap system prompt as a content block so cache_control can be attached.
+# 1-hour TTL ensures cache hits across 15-min CONSERVE ticks.
+SYSTEM_PROMPT_CACHED = [
+    {
+        "type": "text",
+        "text": SYSTEM_PROMPT,
+        "cache_control": {"type": "ephemeral", "ttl": "1h"},
+    }
 ]
 
 
@@ -1084,6 +1095,13 @@ class TradingAgent:
         btc_ind = history.get_indicators("cbBTC")
         regime  = history.get_market_regime(btc_ind, fg_val)
 
+        # Never auto-execute in STRONG_BEAR — macro gives 0 pts, so a 55-point signal
+        # means only trend+RSI+ATR align. That's not enough conviction to bypass AI review.
+        # The AI (Haiku in STRONG_BEAR) will decide if any entry is worth taking.
+        if regime["regime"] == "STRONG_BEAR":
+            logger.info("Auto-execute: STRONG_BEAR regime — deferring all entries to AI review")
+            return None
+
         open_count = len([k for k, v in positions.get_open_positions().items() if v])
         allowed, allow_reason = risk.can_open_trade(total_usd, open_count, regime_label=regime["regime"])
         if not allowed:
@@ -1267,8 +1285,9 @@ class TradingAgent:
                 top = borderline[0]
                 return True, f"borderline signal {top.get('symbol','?')} score={top['signal']['score']}"
 
-        # Top signal has no cached address — Claude must call get_token_info
-        if scored:
+        # Top signal has no cached address — Claude must call get_token_info.
+        # Gated by routine_ok: address lookup failed last time won't retry every 15min.
+        if routine_ok and scored:
             top = scored[0]
             if top["signal"]["score"] >= AUTO_EXEC_THRESHOLD:
                 sym   = top.get("symbol", "")
@@ -1622,7 +1641,7 @@ class TradingAgent:
             response = self.client.messages.create(
                 model=model,
                 max_tokens=2048 if not active else 4096,
-                system=SYSTEM_PROMPT,
+                system=SYSTEM_PROMPT_CACHED,
                 tools=TOOLS,
                 messages=messages,
             )
@@ -1633,13 +1652,22 @@ class TradingAgent:
                 os.makedirs("data", exist_ok=True)
                 with open("data/credit_alert.json", "w") as _f:
                     _json.dump({"ts": datetime.now(timezone.utc).isoformat(), "active": True}, _f)
-                return  # skip this tick; next tick will retry after the interval
+                # Push cooldown far out so no retry for 4h — credits are exhausted
+                self._last_routine_review_ts = time.time() + (4 * 3600 - ROUTINE_COOLDOWN)
+                return
             raise
 
         # Record now — before the tool loop which can also raise. Any exception after the
         # first successful response still counts as a review attempt; leaving this at 0
         # would trigger Claude every tick while the error persists.
         self._last_claude_review_ts = time.time()
+
+        # Log cache performance so we can verify savings
+        usage = response.usage
+        cache_read  = getattr(usage, "cache_read_input_tokens", 0) or 0
+        cache_write = getattr(usage, "cache_creation_input_tokens", 0) or 0
+        if cache_read or cache_write:
+            logger.info(f"Cache: {cache_read} tokens read, {cache_write} tokens written")
 
         # Agentic loop — handle tool calls until model stops
         while response.stop_reason == "tool_use":
@@ -1657,11 +1685,10 @@ class TradingAgent:
             messages.append({"role": "assistant", "content": response.content})
             messages.append({"role": "user", "content": tool_results})
 
-            # Always use Sonnet for tool follow-ups (needs full reasoning)
             response = self.client.messages.create(
-                model="claude-sonnet-4-6",
+                model=model,
                 max_tokens=4096,
-                system=SYSTEM_PROMPT,
+                system=SYSTEM_PROMPT_CACHED,
                 tools=TOOLS,
                 messages=messages,
             )
