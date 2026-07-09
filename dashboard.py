@@ -183,6 +183,7 @@ HTML = """
   <div class="tab" onclick="showTab('knowledge')">Knowledge Base</div>
   <div class="tab" onclick="showTab('airdrops')">Airdrops{% if airdrop_tokens %} <span style="background:#f59e0b;color:#000;border-radius:8px;padding:1px 6px;font-size:0.65rem;margin-left:4px">{{ airdrop_tokens|length }}</span>{% endif %}</div>
   <div class="tab" onclick="showTab('dust')">Dust{% if dust_tokens %} <span style="background:#475569;color:#e2e8f0;border-radius:8px;padding:1px 6px;font-size:0.65rem;margin-left:4px">{{ dust_tokens|length }}</span>{% endif %}</div>
+  <div class="tab" onclick="showTab('hyperliquid')">Hyperliquid{% if hl.positions %} <span style="background:#6366f1;color:#fff;border-radius:8px;padding:1px 6px;font-size:0.65rem;margin-left:4px">{{ hl.positions|length }}</span>{% endif %}</div>
 </div>
 
 <!-- TAB: PORTFOLIO -->
@@ -788,6 +789,144 @@ HTML = """
 </div>
 </div><!-- end tab-dust -->
 
+<!-- TAB: HYPERLIQUID -->
+<div id="tab-hyperliquid" class="tab-content">
+<div class="container">
+
+{% if not hl.active %}
+<div class="section" style="margin-top:24px;text-align:center;padding:40px 24px;">
+  <div style="font-size:1.2rem;font-weight:700;color:#94a3b8;margin-bottom:10px">Hyperliquid Bot — Not Yet Active</div>
+  <div style="color:#64748b;font-size:0.85rem;max-width:500px;margin:0 auto;">
+    HL_PRIVATE_KEY is not configured. Fund a new EVM wallet on Hyperliquid, add the key to .env, then run
+    <code style="background:#1e2236;padding:2px 6px;border-radius:4px;font-size:0.8rem">deploy/setup_hl.sh</code>.
+    See WALLET_MIGRATION.md in the repo.
+  </div>
+</div>
+
+{% else %}
+
+<!-- Summary -->
+<div class="row-label">Account</div>
+<div class="grid grid-top">
+  <div class="card">
+    <div class="label">Account Balance</div>
+    <div class="value sm">${{ "%.2f"|format(hl.account_usd) }}</div>
+    <div class="sub">Latest snapshot</div>
+  </div>
+  <div class="card">
+    <div class="label">Open Positions</div>
+    <div class="value {{ 'pos' if hl.positions|length > 0 else '' }}">{{ hl.positions|length }}</div>
+    <div class="sub">2 max simultaneously</div>
+  </div>
+  <div class="card">
+    <div class="label">Win Rate</div>
+    <div class="value {{ 'pos' if hl.win_rate >= 50 else ('neg' if hl.total > 0 else '') }}">{{ hl.win_rate }}%</div>
+    <div class="sub">{{ hl.wins }}W / {{ hl.losses }}L all time</div>
+  </div>
+  <div class="card">
+    <div class="label">Realized P&L</div>
+    <div class="value sm {{ 'pos' if hl.realized_pnl >= 0 else 'neg' }}">${{ "%+.2f"|format(hl.realized_pnl) }}</div>
+    <div class="sub">{{ hl.total }} closed trades</div>
+  </div>
+  <div class="card">
+    <div class="label">Risk Status</div>
+    {% if hl.all_clear %}
+    <div class="value pos" style="font-size:1rem">All Clear</div>
+    <div class="sub">Trading enabled</div>
+    {% else %}
+    <div class="value neg" style="font-size:1rem">Guards Active</div>
+    <div class="sub">{{ 'Drawdown limit' if not hl.drawdown_ok else 'Win rate low' }}</div>
+    {% endif %}
+  </div>
+  <div class="card">
+    <div class="label">Last Tick</div>
+    <div class="value sm">{{ hl.last_tick | to_est if hl.last_tick else '—' }}</div>
+    <div class="sub">15-min interval</div>
+  </div>
+</div>
+
+<!-- Open positions -->
+<div class="section" style="margin-top:16px">
+  <h2>Open Positions &nbsp;&middot;&nbsp; <span style="font-weight:400;color:#64748b;">2x leverage &middot; BTC / ETH / SOL perps</span></h2>
+  {% if hl.positions %}
+  <div style="display:flex;flex-direction:column;gap:12px;">
+  {% for p in hl.positions %}
+  {% set is_up = p.gain_loss_pct >= 0 %}
+  <div style="border:1px solid #334155;border-radius:10px;overflow:hidden;background:#0f172a;">
+    <div style="display:flex;align-items:center;gap:10px;padding:12px 16px;background:#1e293b;border-bottom:1px solid #334155;flex-wrap:wrap;">
+      <div style="font-size:1.15rem;font-weight:800;letter-spacing:0.04em;">{{ p.coin }}-PERP</div>
+      <span class="pill {{ p.direction }}">{{ p.direction.upper() }}</span>
+      <div style="font-size:1.1rem;font-weight:700;color:{{ '#22c55e' if is_up else '#ef4444' }};">
+        {{ "%+.2f"|format(p.gain_loss_pct) }}%
+        <span style="font-size:0.85rem;font-weight:500;opacity:0.8;">&nbsp;(${{ "%+.2f"|format(p.unrealized_pnl) }})</span>
+      </div>
+      <div style="flex:1"></div>
+      <div style="color:#94a3b8;font-size:0.78rem;">{{ "%.1f"|format(p.hold_hours) }}h held &nbsp;&middot;&nbsp; 2x leverage</div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0;">
+      <div style="padding:12px 16px;border-right:1px solid #1e293b;">
+        <div style="color:#64748b;font-size:0.7rem;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:6px;">Price</div>
+        <div style="font-size:0.78rem;color:#94a3b8;margin-bottom:4px;">Entry: ${{ "%.2f"|format(p.entry_price) }}</div>
+        <div style="font-size:1.05rem;font-weight:700;color:{{ '#22c55e' if is_up else '#ef4444' }};">
+          {% if p.current_price > 0 %}${{ "%.2f"|format(p.current_price) }}{% else %}<span style="color:#475569">—</span>{% endif %}
+        </div>
+      </div>
+      <div style="padding:12px 16px;border-right:1px solid #1e293b;">
+        <div style="color:#64748b;font-size:0.7rem;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:6px;">Take Profit</div>
+        <div style="font-size:0.95rem;font-weight:700;color:#22c55e;">${{ "%.2f"|format(p.tp_price) }}</div>
+        <div style="font-size:0.72rem;color:#64748b;margin-top:2px;">+5% notional from entry</div>
+      </div>
+      <div style="padding:12px 16px;">
+        <div style="color:#64748b;font-size:0.7rem;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:6px;">Stop Loss</div>
+        <div style="font-size:0.95rem;font-weight:700;color:#ef4444;">${{ "%.2f"|format(p.sl_price) }}</div>
+        <div style="font-size:0.72rem;color:#64748b;margin-top:2px;">-3% notional from entry</div>
+      </div>
+    </div>
+    <div style="padding:10px 16px;display:flex;gap:24px;flex-wrap:wrap;font-size:0.78rem;color:#94a3b8;border-top:1px solid #1e293b;">
+      <span><span style="color:#64748b;">Margin:</span> ${{ "%.2f"|format(p.cost_basis_usd) }}</span>
+      <span><span style="color:#64748b;">Size:</span> {{ "%.4f"|format(p.size_coins|abs) }} {{ p.coin }}</span>
+      <span><span style="color:#64748b;">Notional:</span> ${{ "%.2f"|format(p.cost_basis_usd * p.leverage) }}</span>
+      <span style="color:#475569;font-size:0.72rem;flex:1">{{ p.reasoning[:80] }}{% if p.reasoning|length > 80 %}...{% endif %}</span>
+    </div>
+  </div>
+  {% endfor %}
+  </div>
+  {% else %}
+  <div class="empty">No open positions</div>
+  {% endif %}
+</div>
+
+<!-- Closed trades -->
+<div class="section" style="margin-top:14px">
+  <h2>Closed Trades</h2>
+  {% if hl.closed %}
+  <div style="max-height:400px;overflow-y:auto;">
+  <table>
+    <tr><th>Date</th><th>Coin</th><th>Dir</th><th>Margin</th><th>Proceeds</th><th>P&L $</th><th>P&L %</th><th>Hold</th><th>Exit</th></tr>
+    {% for t in hl.closed | reverse %}
+    <tr>
+      <td style="color:#64748b;font-size:0.73rem;white-space:nowrap">{{ t.date_closed | to_est_date }}</td>
+      <td style="font-weight:600">{{ t.coin }}</td>
+      <td><span class="pill {{ t.direction }}">{{ t.direction.upper() }}</span></td>
+      <td>${{ "%.2f"|format(t.cost_basis_usd|float) }}</td>
+      <td>${{ "%.2f"|format(t.proceeds_usd|float) }}</td>
+      <td class="{{ 'pos' if t.gain_loss_usd|float >= 0 else 'neg' }}">${{ "%+.2f"|format(t.gain_loss_usd|float) }}</td>
+      <td class="{{ 'pos' if t.gain_loss_pct|float >= 0 else 'neg' }}">{{ "%+.2f"|format(t.gain_loss_pct|float) }}%</td>
+      <td>{{ "%.1f"|format(t.hold_hours|float) }}h</td>
+      <td style="color:#64748b;font-size:0.73rem">{{ t.exit_tx if t.exit_tx else '—' }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  </div>
+  {% else %}
+  <div class="empty">No closed trades yet — activates after first HL trade</div>
+  {% endif %}
+</div>
+
+{% endif %}
+</div>
+</div><!-- end tab-hyperliquid -->
+
 <script>
 function showTab(name) {
   document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
@@ -1210,6 +1349,85 @@ def _get_full_balances(w3, wallet_address: str, prices: dict, custom_tokens: dic
     return balances
 
 
+def _get_hl_data() -> dict:
+    """Load Hyperliquid bot data for the dashboard tab. Graceful when HL not yet active."""
+    empty = {
+        "positions": [], "closed": [], "prices": {}, "account_usd": 0.0,
+        "last_tick": None, "win_rate": 0, "wins": 0, "losses": 0, "total": 0,
+        "realized_pnl": 0.0, "drawdown_ok": True, "win_rate_ok": True,
+        "all_clear": True, "recent_wins": 0, "recent_total": 0, "active": False,
+    }
+    if not os.getenv("HL_PRIVATE_KEY", ""):
+        return empty
+    try:
+        from hyperliquid import market as hl_mkt, positions as hl_pos, risk as hl_risk
+        from hyperliquid.config import MAX_OPEN
+
+        prices = {}
+        try:
+            prices = hl_mkt.get_all_prices()
+        except Exception:
+            pass
+
+        pos_list = []
+        try:
+            pos_list = hl_pos.get_position_summary(prices)
+        except Exception:
+            pass
+
+        closed = _load_csv("records/hl_realized_gains.csv")
+
+        account_usd = 0.0
+        snaps_file = "data/hl_portfolio_snapshots.json"
+        if os.path.exists(snaps_file):
+            try:
+                snaps = json.load(open(snaps_file))
+                if snaps:
+                    account_usd = float(snaps[sorted(snaps)[-1]])
+            except Exception:
+                pass
+
+        risk_data = {"drawdown_ok": True, "win_rate_ok": True, "all_clear": True,
+                     "recent_wins": 0, "recent_total": 0}
+        try:
+            risk_data = hl_risk.get_risk_summary(account_usd, len(pos_list), MAX_OPEN)
+        except Exception:
+            pass
+
+        last_tick = None
+        if os.path.exists("data/hl_last_tick.json"):
+            try:
+                last_tick = json.load(open("data/hl_last_tick.json")).get("ts", "")
+            except Exception:
+                pass
+
+        wins = sum(1 for t in closed if float(t.get("gain_loss_pct", 0)) >= 0)
+        total = len(closed)
+        realized_pnl = sum(float(t.get("gain_loss_usd", 0)) for t in closed)
+
+        return {
+            "positions":    pos_list,
+            "closed":       closed,
+            "prices":       prices,
+            "account_usd":  account_usd,
+            "last_tick":    last_tick,
+            "win_rate":     round(wins / total * 100) if total > 0 else 0,
+            "wins":         wins,
+            "losses":       total - wins,
+            "total":        total,
+            "realized_pnl": round(realized_pnl, 2),
+            "drawdown_ok":  risk_data.get("drawdown_ok", True),
+            "win_rate_ok":  risk_data.get("win_rate_ok", True),
+            "all_clear":    risk_data.get("all_clear", True),
+            "recent_wins":  risk_data.get("recent_wins", 0),
+            "recent_total": risk_data.get("recent_total", 0),
+            "active":       True,
+        }
+    except Exception as e:
+        _log.warning(f"HL dashboard data failed: {e}")
+        return empty
+
+
 @app.route("/")
 @require_auth
 def index():
@@ -1457,6 +1675,7 @@ def index():
         recent_issues=_get_recent_issues(),
         airdrop_tokens=[t for t in airdrop_tokens if (t.get("value_usd") or 0) >= 5],
         dust_tokens=dust_tokens,
+        hl=_get_hl_data(),
     )
 
 

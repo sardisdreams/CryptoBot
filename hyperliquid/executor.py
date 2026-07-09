@@ -197,7 +197,7 @@ def close_position(coin: str, reason: str = "manual") -> dict | None:
             coin=coin,
             exit_price=fill_price,
             proceeds_usd=proceeds,
-            exit_reason=reason,
+            exit_tx=reason,
         )
         return realized
 
