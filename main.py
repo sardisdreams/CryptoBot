@@ -276,7 +276,6 @@ def main():
         lines = "\n".join(f"  • {f['check']}: {f['detail']}" for f in audit_failures)
         logger.error(f"Code audit FAILED — {len(audit_failures)} invariant(s) violated:\n{lines}")
         try:
-            from bot.emailer import send_alert
             send_alert(
                 subject=f"CryptoBot Audit: {len(audit_failures)} invariant(s) violated",
                 body=f"Code audit found {len(audit_failures)} violation(s):\n\n{lines}\n\nSee KNOWN_ISSUES.md for fix guidance.",

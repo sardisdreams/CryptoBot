@@ -1617,6 +1617,19 @@ class TradingAgent:
         # ── Decide whether Claude review is needed ───────────────────────────────
         needs_review, review_reason = self._needs_claude_review(snapshot, _scored, auto_executed)
 
+        # Skip if risk guards prevent trading AND there are no open positions to manage.
+        # Claude can't open trades when locked, and has nothing to exit — skip the call.
+        if needs_review and not positions.get_open_positions():
+            _trade_ok, _block_reason = risk.can_open_trade(
+                snapshot.get("total_usd", 0), 0, regime_label=_regime["regime"]
+            )
+            if not _trade_ok:
+                logger.info(
+                    f"Skipping Claude — risk guards locked ({_block_reason}), no open positions | "
+                    f"best_score={self.last_best_signal_score}"
+                )
+                needs_review = False
+
         if not needs_review:
             logger.info(
                 f"Skipping Claude — no review needed | "
@@ -1666,7 +1679,7 @@ class TradingAgent:
                 with open("data/credit_alert.json", "w") as _f:
                     _json.dump({"ts": datetime.now(timezone.utc).isoformat(), "active": True}, _f)
                 # Push cooldown far out so no retry for 4h — credits are exhausted
-                self._last_routine_review_ts = time.time() + (4 * 3600 - ROUTINE_COOLDOWN)
+                self._last_routine_review_ts = time.time() + (4 * 3600 - 45 * 60)
                 return
             raise
 
