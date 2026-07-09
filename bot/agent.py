@@ -1106,7 +1106,20 @@ class TradingAgent:
         allowed, allow_reason = risk.can_open_trade(total_usd, open_count, regime_label=regime["regime"])
         if not allowed:
             logger.info(f"Auto-execute: risk guard blocked — {allow_reason}")
-            return None
+            # Recovery probe: if win rate deadlock lifted (7-day escape valve in risk.py),
+            # only allow this one path through for signals ≥ 70. Anything weaker waits.
+            if "Win rate" in allow_reason:
+                ok_wr, _ = risk.check_win_rate()
+                if not ok_wr:
+                    return None
+                # Guard lifted by escape valve — enforce stricter score threshold
+                best = max((c["score"] for c in scored if c.get("entry_ok")), default=0)
+                if best < 70:
+                    logger.info(f"Auto-execute: recovery probe requires score ≥ 70, best={best}")
+                    return None
+                logger.info("Auto-execute: win rate recovery probe — allowing one high-conviction trade")
+            else:
+                return None
 
         trade_usd = cap["max_trade"]
         if trade_usd < cap["min_trade"]:

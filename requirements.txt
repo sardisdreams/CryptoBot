@@ -6,3 +6,6 @@ schedule>=1.2.0
 colorlog>=6.7.0
 anthropic>=0.40.0
 flask>=3.0.0
+numpy>=1.24.0
+# Hyperliquid perpetuals bot
+hyperliquid-python-sdk>=0.8.0

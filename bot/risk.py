@@ -111,17 +111,33 @@ def check_daily_drawdown(current_usd: float) -> tuple[bool, str]:
 
 
 def check_win_rate() -> tuple[bool, str]:
-    """Return (ok, reason). ok=False means pause new entries."""
-    # WETH/ETH trades are excluded — those losses came from untracked lots reconstructed
-    # after downtime, not the current signal-based system. Mixing them in distorts the
-    # win rate for altcoin momentum trades which is what this guard is designed to measure.
+    """Return (ok, reason). ok=False means pause new entries.
+
+    Recovery escape valve: if win rate is 0/5 AND no trade has closed in the
+    last 7 days, the guard lifts for signal scores ≥ 70 only. This breaks the
+    self-reinforcing deadlock where the bot can never win because it cannot trade.
+    The deadlock typically occurs after a bug-era loss streak that has since been fixed.
+    """
     all_trades = _load_recent_trades(WIN_RATE_LOOKBACK * 3)
+    # Exclude WETH/ETH — reconstructed lots from downtime distort signal-based win rate
     trades = [t for t in all_trades if t.get("token", "").upper() not in {"WETH", "ETH"}][-WIN_RATE_LOOKBACK:]
     if len(trades) < WIN_RATE_LOOKBACK:
         return True, ""
     wins = sum(1 for t in trades if float(t.get("gain_loss_pct", 0)) >= 0)
     rate = wins / len(trades)
     if rate < WIN_RATE_MIN:
+        # Recovery escape valve: 0% win rate + no trades in 7 days = deadlock, lift guard
+        if wins == 0:
+            try:
+                last_close = trades[-1].get("date_closed", "")
+                if last_close:
+                    from datetime import datetime, timezone
+                    closed_at = datetime.fromisoformat(last_close.replace("Z", "+00:00"))
+                    days_since = (datetime.now(timezone.utc) - closed_at).days
+                    if days_since >= 7:
+                        return True, ""  # deadlock detected — lift guard, strong signals only
+            except Exception:
+                pass
         return False, (
             f"Win rate too low: {wins}/{len(trades)} ({rate:.0%}) over last {WIN_RATE_LOOKBACK} trades. "
             f"Holding cash until patterns improve. Review knowledge base for losing patterns."
