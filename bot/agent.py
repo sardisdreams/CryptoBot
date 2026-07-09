@@ -5,7 +5,7 @@ import httpx
 import certifi
 import anthropic
 from datetime import datetime, timezone
-from bot.config import ANTHROPIC_API_KEY, TOKENS, MAX_DEPLOY_USD, MIN_TRADE_USD, MAX_TRADE_USD, SWING_TARGETS
+from bot.config import ANTHROPIC_API_KEY, TOKENS, SWING_TARGETS
 from bot.portfolio import Portfolio
 from bot.executor import Executor
 from bot.logger import setup_logger
@@ -84,7 +84,8 @@ def _refresh_held_token_prices(prices: dict):
     from CoinGecko and inject it directly into the prices dict for this tick.
     Also persists to token cache. Skips tokens already priced this cycle.
     """
-    import requests, certifi
+    import requests
+    import certifi
     open_pos = positions.get_open_positions()
     # Build symbol→cg_id map for tokens we need to price
     sym_to_cg = {}
@@ -127,7 +128,7 @@ def _refresh_held_token_prices(prices: dict):
     except Exception as e:
         logger.warning(f"Could not refresh held token prices: {e}")
 
-SYSTEM_PROMPT = f"""You are a fully autonomous crypto trading agent on the Base blockchain. You operate without human supervision. Make all trading decisions independently using the data provided each tick.
+SYSTEM_PROMPT = """You are a fully autonomous crypto trading agent on the Base blockchain. You operate without human supervision. Make all trading decisions independently using the data provided each tick.
 
 ## Your mission
 Grow the portfolio through disciplined short-term trading. Protect capital first, grow it second. Every decision — entry, exit, position sizing — is yours to make.
@@ -389,11 +390,11 @@ class TradingAgent:
             f"Deployment: ${currently_deployed:.2f} deployed | Max deploy: ${dyn_max_deploy:.2f} (everything above floor) | Available: ${max(0, dyn_max_deploy - currently_deployed):.2f}",
             f"Trade size: ${dyn_min_trade:.0f}–${dyn_max_trade:.0f} for NEW buys only (5–10% of portfolio). NO minimum on sells — always exit a position regardless of size.",
             f"Recovery mode: {'YES — USDC below floor, no new trades' if in_recovery else 'No — trading permitted'}",
-            f"",
+            "",
             f"== MARKET REGIME: {regime['regime']} (score {regime['score']:+d}) ==",
             f"BTC: 1h {regime['btc_1h']:+.2f}% | 4h {regime['btc_4h']:+.2f}% | 24h {regime['btc_24h']:+.2f}% | F&G {regime['fear_greed']}/100",
             f"Guidance: {regime['guidance']}",
-            f"",
+            "",
             f"Trading session: {session['session']} ({session['hour_utc']:02d}:00 UTC)",
             f"{session['volume_note']}",
             f"Total realized gains: ${realized['total_realized_gain_usd']:+,.2f} "
@@ -681,7 +682,7 @@ class TradingAgent:
                         lines.append(f"    {cond}")
             else:
                 best_score = scored[0]["signal"]["score"] if scored else 0
-                lines += ["", f"Signal filter: no candidates scored ≥ 55 this tick — do not force entries.",
+                lines += ["", "Signal filter: no candidates scored ≥ 55 this tick — do not force entries.",
                           f"(Scored {len(scored)} candidates, best score: {best_score}/100)"]
 
         # Wiki only for tokens currently held (not entire registry)
@@ -1465,7 +1466,6 @@ class TradingAgent:
             sym     = ex["symbol"]
             amt     = ex["amount_tokens"]
             reason  = ex["reason"]
-            urgency = ex["urgency"]
             logger.info(f"Mechanical exit triggered: {sym} | {reason}")
 
             # Stop loss and take profit execute immediately
@@ -1542,7 +1542,6 @@ class TradingAgent:
         os.makedirs("data", exist_ok=True)
 
         base_eco = screening.get("base_ecosystem", [])
-        prices   = context["prices"]
         fg_val   = context["fear_and_greed"].get("value", 50)
         all_inds = history.get_all_indicators([s for s in TOKENS if s not in {"USDC","USDT","DAI"}])
 

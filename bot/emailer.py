@@ -15,7 +15,6 @@ import os
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from datetime import datetime, timezone
 from bot.logger import setup_logger
 
 logger = setup_logger("emailer")

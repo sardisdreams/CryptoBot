@@ -90,12 +90,12 @@ def score_entry(cg_id: str, symbol: str, current_price: float, btc_regime: str) 
     if sma10 and sma20:
         if current_price > sma10 and sma10 > sma20:
             score += 15
-            conditions.append(f"✓ Price > SMA10 > SMA20 — momentum aligned")
+            conditions.append("✓ Price > SMA10 > SMA20 — momentum aligned")
         elif current_price > sma10:
             score += 7
-            conditions.append(f"~ Price > SMA10, SMA10 below SMA20 — early recovery")
+            conditions.append("~ Price > SMA10, SMA10 below SMA20 — early recovery")
         else:
-            conditions.append(f"✗ Price < SMA10 — short-term momentum negative")
+            conditions.append("✗ Price < SMA10 — short-term momentum negative")
 
     # ── 5. MACRO: BTC regime (15 pts) ─────────────────────────────────────────
     if btc_regime in ("BULL", "STRONG_BULL"):
@@ -103,12 +103,12 @@ def score_entry(cg_id: str, symbol: str, current_price: float, btc_regime: str) 
         conditions.append(f"✓ BTC {btc_regime} — macro tailwind")
     elif btc_regime == "NEUTRAL":
         score += 10
-        conditions.append(f"~ BTC NEUTRAL — no macro headwind")
+        conditions.append("~ BTC NEUTRAL — no macro headwind")
     elif btc_regime == "BEAR":
         score += 5
-        conditions.append(f"~ BTC BEAR — headwind, require stronger setup")
+        conditions.append("~ BTC BEAR — headwind, require stronger setup")
     else:
-        conditions.append(f"✗ BTC STRONG_BEAR — avoid new entries")
+        conditions.append("✗ BTC STRONG_BEAR — avoid new entries")
 
     # ── 6. VOLATILITY: ATR < 12% (10 pts) ────────────────────────────────────
     atr     = _atr(candles[-15:])

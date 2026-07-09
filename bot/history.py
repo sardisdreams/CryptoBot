@@ -420,8 +420,6 @@ def get_market_regime(btc_indicators: dict, fear_greed_value: int) -> dict:
     btc_4h   = btc_indicators.get("momentum_4h_pct") or 0
     btc_24h  = btc_indicators.get("momentum_24h_pct") or 0
     btc_trend = btc_indicators.get("trend", "unknown")
-    btc_rsi  = btc_indicators.get("rsi_14") or 50
-
     # Score: positive = bullish, negative = bearish
     score = 0
     if btc_1h > 1:   score += 1

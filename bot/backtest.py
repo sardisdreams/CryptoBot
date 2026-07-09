@@ -9,7 +9,6 @@ Usage:
 import json
 import os
 import argparse
-from datetime import datetime, timezone
 
 
 def _load_history(symbol: str) -> list[dict]:
@@ -72,8 +71,6 @@ def run_backtest(
         window = prices[:i]
         current = prices[i]
         rsi = _calc_rsi(window)
-        sma5  = _calc_sma(window, 5)
-        sma20 = _calc_sma(window, 20)
         mom1h = (prices[i] - prices[i-2]) / prices[i-2] * 100 if i >= 2 and prices[i-2] > 0 else 0
 
         if not in_position:
@@ -82,7 +79,6 @@ def run_backtest(
             if min_rsi_buy:
                 rsi_ok = rsi_ok and rsi > min_rsi_buy
             mom_ok = mom1h >= momentum_threshold
-            trend_ok = sma5 and sma20 and sma5 < sma20  # buying into dip (below 20 SMA)
 
             if rsi_ok and mom_ok:
                 in_position = True

@@ -31,7 +31,15 @@ The daily audit script checks for regressions on every pattern listed here.
 **Fix:** Moved the check inside the `routine_ok` block.  
 **Invariant:** Any code path that calls Claude or performs expensive per-token work must be inside the `routine_ok` gate. Never add early-exit logic that fires Claude outside the cooldown.
 
-### 4. Credit exhaustion caused immediate retry loop
+### 4. Crash loop burned $20 in credits with no trades (July 1–2 2026)
+**Symptom:** Bot spent ~$20 in ~11 hours without making any trades. Logs showed a Claude call every 30-60 seconds.  
+**Root cause:** Two separate NameErrors caused the bot to crash on every tick. Each crash reset the in-memory 45-minute cooldown, so the next restart immediately triggered a Claude call. At ~$0.04/call and one crash per 30–60s, this burns ~$4.80/hour.  
+**Bug 1 — `ROUTINE_COOLDOWN` out of scope:** The variable was a local in `_needs_claude_review()` but referenced in `run_once()` (different method). Python NameError on every crash.  
+**Bug 2 — `send_alert` closure bug:** A `from bot.emailer import send_alert` inside a `try` block in `run()` shadowed the module-level import. Python treated `send_alert` as a local variable in `run()` scope. `_check_daily_api_cost()` is a closure inside `run()` — it captured `send_alert` as a free variable, but if `audit_failures` was empty, the `try` block never ran and `send_alert` was unbound. Python error: "cannot access free variable 'send_alert' where it is not associated with a value in enclosing scope."  
+**Fix:** Inline `45 * 60` at the one out-of-scope reference. Remove the redundant local import in main.py.  
+**Invariant:** Any local variable in one method is NOT visible in other methods of the same class. Do not reference method-local variables from other methods. Do not re-import at function scope what is already imported at module scope — it can shadow the module-level name and break closures.
+
+### 5. Credit exhaustion caused immediate retry loop
 **Symptom:** When Anthropic credits ran out, the bot crashed and restarted every 30s, logging the same error in a tight loop.  
 **Root cause:** `"usage limits"` and `"credit balance"` errors in the API call weren't extended into the routine cooldown — they let the next tick call Claude immediately.  
 **Fix:** Credit errors now push `_last_routine_review_ts` forward by 4 hours.  
@@ -218,3 +226,7 @@ These are recurring patterns responsible for multiple bugs above. Check for them
 7. **CSV field mismatch** — Adding a field to a data class or dict means adding it to every CSV writer/reader for that data. Check all write sites in the table in CLAUDE.md.
 
 8. **Guard ordering** — Regime must be calculated before any risk call. Order in `_build_market_prompt()` is non-negotiable.
+
+9. **Method-local variables referenced from other methods** — A local variable defined in one method (e.g. `ROUTINE_COOLDOWN` in `_needs_claude_review`) is not visible in any other method. If a value is needed in multiple methods, define it as a class constant or module constant.
+
+10. **Duplicate imports shadowing module-level names / breaking closures** — If a name is already imported at module level, do NOT re-import it inside a function. The local `from x import y` makes Python treat `y` as a local variable in that function's scope. Any nested closure that references `y` will fail if the local assignment is only in a conditional branch that wasn't reached.

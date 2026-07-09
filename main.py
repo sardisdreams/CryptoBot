@@ -1,4 +1,3 @@
-import bot.ssl_fix  # must be first import — patches SSL before any HTTPS calls
 
 import json
 import os

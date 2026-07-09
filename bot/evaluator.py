@@ -38,7 +38,6 @@ def check_goplus_security(contract_address: str) -> dict:
         has_blacklist = token_data.get("is_blacklisted", "0") == "1"
         owner_change  = token_data.get("can_take_back_ownership", "0") == "1"
         hidden_owner  = token_data.get("hidden_owner", "0") == "1"
-        proxy         = token_data.get("is_proxy", "0") == "1"
 
         if is_honeypot:      flags.append("HONEYPOT — cannot sell")
         if buy_tax > 0.10:   flags.append(f"High buy tax: {buy_tax:.0%}")

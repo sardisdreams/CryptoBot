@@ -244,7 +244,6 @@ def check_mechanical_exits(current_prices: dict[str, float]) -> list[dict]:
 
     positions = _load()
     exits = []
-    now = datetime.now(timezone.utc)
 
     for symbol, lots in positions.items():
         current_price = current_prices.get(symbol, 0)
@@ -254,7 +253,6 @@ def check_mechanical_exits(current_prices: dict[str, float]) -> list[dict]:
         for lot in lots:
             tp    = lot.get("take_profit_price")
             sl    = lot.get("stop_loss_price")
-            until = lot.get("max_hold_until")
 
             # Stop loss — sell entire lot immediately
             if sl and current_price <= sl:

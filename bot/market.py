@@ -1,7 +1,7 @@
 import time as _time_mod
 import requests
 import certifi
-from bot.config import TOKENS, STABLECOINS
+from bot.config import STABLECOINS
 from bot.logger import setup_logger
 
 logger = setup_logger("market")

@@ -1,5 +1,5 @@
 from web3 import Web3
-from bot.config import TOKENS, STABLECOINS
+from bot.config import TOKENS
 from bot.market import Market
 from bot.wallet import Wallet
 from bot.logger import setup_logger

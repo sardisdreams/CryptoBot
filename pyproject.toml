@@ -1,0 +1,11 @@
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+# Enforce: unused imports, undefined names, unused variables, redefined imports
+# Ignore: style rules (E701 single-line ifs, E402 late imports, E741 ambiguous names)
+select = ["F401", "F811", "F821", "F841"]
+ignore = []
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

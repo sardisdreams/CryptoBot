@@ -16,6 +16,22 @@ sudo -u cryptobot git pull
 echo "Updating dependencies..."
 sudo -u cryptobot .venv/bin/pip install -r requirements.txt -q
 
+# Static analysis — catch undefined names and unused imports before restart
+echo "Running lint check..."
+sudo -u cryptobot .venv/bin/ruff check bot/ main.py dashboard.py
+if [ $? -ne 0 ]; then
+    echo "DEPLOY BLOCKED: lint errors detected. Fix them before deploying."
+    exit 1
+fi
+
+# Run test suite
+echo "Running tests..."
+sudo -u cryptobot .venv/bin/python -m pytest tests/ -q --tb=short
+if [ $? -ne 0 ]; then
+    echo "DEPLOY BLOCKED: tests failed. Fix them before deploying."
+    exit 1
+fi
+
 # Restart services
 echo "Restarting services..."
 systemctl restart cryptobot

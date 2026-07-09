@@ -1,6 +1,6 @@
 from web3 import Web3
 from eth_account import Account
-from bot.config import PRIVATE_KEY, BASE_RPC_URL, BASE_CHAIN_ID
+from bot.config import PRIVATE_KEY
 from bot.logger import setup_logger
 
 logger = setup_logger("wallet")

@@ -16,8 +16,6 @@ Usage:
   python -m bot.audit --full     # tier 1 + tier 2 Claude review
   python -m bot.audit --force    # force tier 2 even if no code changes
 """
-import importlib
-import inspect
 import json
 import os
 import re
@@ -102,8 +100,7 @@ def _import_agent():
     """Import agent module from project root without side effects."""
     spec_path = str(ROOT / "bot" / "agent.py")
     import importlib.util
-    spec = importlib.util.spec_from_file_location("bot.agent", spec_path)
-    mod = importlib.util.module_from_spec(spec)
+    importlib.util.spec_from_file_location("bot.agent", spec_path)
     # Don't exec — just parse source for checks that don't need runtime
     return spec_path
 
@@ -542,7 +539,7 @@ If no issues found, return []. Return ONLY the JSON array, no other text."""
         findings = json.loads(raw)
     except json.JSONDecodeError:
         if verbose:
-            print(f"  [Claude review] Could not parse response as JSON")
+            print("  [Claude review] Could not parse response as JSON")
         return []
     except Exception as e:
         if verbose:
@@ -635,7 +632,7 @@ def main():
         sys.exit(1)
 
     else:
-        print(f"\n✓ All checks passed — code is clean.\n")
+        print("\n✓ All checks passed — code is clean.\n")
         sys.exit(0)
 
 

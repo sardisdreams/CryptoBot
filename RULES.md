@@ -96,8 +96,16 @@ fix the rule violation first or explicitly update this file with the new contrac
 
 ---
 
-## Pre-flight Checklist (run mentally before every PR)
+## Pre-flight Checklist (run before every commit)
 
+**Automated — must pass before pushing:**
+```
+ruff check bot/ main.py dashboard.py    # catches undefined names, unused imports
+python -m pytest tests/ -q              # smoke tests + critical-path logic
+```
+Both are gates in `deploy/update.sh` and will block deploys if they fail.
+
+**Manual review — check the relevant section:**
 - [ ] Does this change touch prices? → Check P1–P6
 - [ ] Does this change touch balances or portfolio total? → Check B1–B3
 - [ ] Does this change write to positions.json? → Check D1–D3
@@ -105,3 +113,10 @@ fix the rule violation first or explicitly update this file with the new contrac
 - [ ] Does this change touch executor, risk, or capital? → Check R1–R7
 - [ ] Does this change touch exit logic? → Check M1–M4
 - [ ] Am I about to push? → Check X1–X3
+
+**Code review — check for these before committing:**
+- [ ] Are any variables defined in one method and referenced in another? (KNOWN_ISSUES pattern 9)
+- [ ] Are there any `from x import y` inside functions for names already imported at module level? (KNOWN_ISSUES pattern 10)
+- [ ] Does any new API call use `SYSTEM_PROMPT_CACHED` and the `model` variable (not hardcoded)?
+- [ ] Does any new code add a Claude call outside the `routine_ok` cooldown gate?
+- [ ] Is every new field added to all CSV writers/readers that touch that data?

@@ -1,4 +1,3 @@
-import bot.ssl_fix  # must be first
 import os
 import csv
 import json
@@ -13,8 +12,6 @@ os.makedirs("records", exist_ok=True)
 os.makedirs("data", exist_ok=True)
 
 from bot.market import Market
-from bot.portfolio import Portfolio
-from bot.wallet import Wallet
 from bot.positions import get_position_summary, get_realized_summary
 from bot.config import BASE_RPC_URL, TOKENS, BOT_VERSION
 from bot import capital, knowledge as knowledge_module
@@ -28,9 +25,9 @@ def _get_wallet_address() -> str:
     return _Account.from_key(_PK).address
 from bot.blacklist import block, unblock, get_all as get_blacklist
 from bot.cost_tracker import get_summary as get_cost_summary
-from flask import Flask, render_template_string, jsonify, request, redirect, request, redirect
 from web3 import Web3
-import certifi, requests as req
+import certifi
+import requests as req
 
 app = Flask(__name__)
 
@@ -1580,7 +1577,7 @@ def index():
             with open("data/credit_alert.json") as _f:
                 _ca = json.load(_f)
             if _ca.get("active"):
-                from datetime import datetime as _dt2, timezone as _tz2, timedelta as _td
+                from datetime import datetime as _dt2, timezone as _tz2
                 _ts = _dt2.fromisoformat(_ca["ts"])
                 if (_dt2.now(_tz2.utc) - _ts).total_seconds() < 3600:
                     est = timezone(timedelta(hours=-5))
