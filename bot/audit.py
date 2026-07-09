@@ -49,7 +49,7 @@ def _git_diff_since(commit: str) -> str:
         return ""
     try:
         r = subprocess.run(
-            ["git", "diff", commit, "HEAD", "--", "bot/", "main.py", "dashboard.py"],
+            ["git", "diff", commit, "HEAD", "--", "bot/", "main.py", "dashboard.py", "hyperliquid/", "hl_main.py"],
             capture_output=True, text=True, cwd=ROOT
         )
         return r.stdout
@@ -275,6 +275,133 @@ def _check_cost_alert():
     return True, "Daily cost alert configured in main.py"
 
 
+# ---------------------------------------------------------------------------
+# HL Bot invariant checks
+# Mirror of the Base bot checks, applied to hyperliquid/ and hl_main.py.
+# Return (True, "") immediately if the HL files are missing (not yet deployed).
+# ---------------------------------------------------------------------------
+
+def _check_hl_private_key_separate():
+    src = _read_file("hyperliquid/config.py")
+    if not src:
+        return True, "hyperliquid/config.py not found — HL bot not yet deployed"
+    if "HL_PRIVATE_KEY" not in src:
+        return False, "hyperliquid/config.py missing HL_PRIVATE_KEY — bot will use wrong wallet"
+    if re.search(r'os\.getenv\(["\']PRIVATE_KEY["\']', src) or re.search(r'os\.environ\.get\(["\']PRIVATE_KEY["\']', src):
+        return False, "hyperliquid/config.py reads PRIVATE_KEY env var — should be HL_PRIVATE_KEY (key isolation)"
+    return True, "HL_PRIVATE_KEY is separate from Base bot PRIVATE_KEY"
+
+
+def _check_hl_system_prompt_cached():
+    src = _read_file("hyperliquid/agent.py")
+    if not src:
+        return True, "hyperliquid/agent.py not found — HL bot not yet deployed"
+    bad = re.findall(r'system\s*=\s*SYSTEM_PROMPT(?!_CACHED)', src)
+    if bad:
+        return False, f"{len(bad)} create() call(s) pass bare SYSTEM_PROMPT (not SYSTEM_PROMPT_CACHED)"
+    if "SYSTEM_PROMPT_CACHED" not in src:
+        return False, "SYSTEM_PROMPT_CACHED not defined in hyperliquid/agent.py — caching never applied"
+    return True, "HL agent uses SYSTEM_PROMPT_CACHED"
+
+
+def _check_hl_tools_cache_control():
+    src = _read_file("hyperliquid/agent.py")
+    if not src:
+        return True, "hyperliquid/agent.py not found — HL bot not yet deployed"
+    tools_block = re.search(r'^TOOLS\s*=\s*\[(.+?)^\]', src, re.MULTILINE | re.DOTALL)
+    if not tools_block:
+        return False, "TOOLS list not found in hyperliquid/agent.py"
+    if '"cache_control"' not in tools_block.group(1) and "'cache_control'" not in tools_block.group(1):
+        return False, "HL TOOLS list has no cache_control — tool definitions are not cached"
+    return True, "HL TOOLS list has cache_control on last entry"
+
+
+def _check_hl_no_hardcoded_model_in_loop():
+    src = _read_file("hyperliquid/agent.py")
+    if not src:
+        return True, "hyperliquid/agent.py not found — HL bot not yet deployed"
+    loop = re.search(r'while response\.stop_reason\s*==\s*["\']tool_use["\'](.+?)(?=\n    def |\Z)', src, re.DOTALL)
+    if not loop:
+        return True, "HL agentic loop not found (may be structured differently)"
+    hardcoded = re.findall(r'model\s*=\s*["\']claude-\S+["\']', loop.group(1))
+    if hardcoded:
+        return False, f"HL agentic loop has hardcoded model string(s): {hardcoded} — should use model variable"
+    return True, "HL agentic loop uses model variable (no hardcoded string)"
+
+
+def _check_hl_tp_sl_on_open():
+    src = _read_file("hyperliquid/executor.py")
+    if not src:
+        return True, "hyperliquid/executor.py not found — HL bot not yet deployed"
+    fn = re.search(r'def open_position\((.+?)(?=\ndef |\Z)', src, re.DOTALL)
+    if not fn:
+        return False, "open_position() not found in hyperliquid/executor.py"
+    body = fn.group(1)
+    has_tp = "tp_result" in body or ('"limit"' in body and "reduce_only" in body)
+    has_sl = "sl_result" in body or ('"trigger"' in body and "reduce_only" in body)
+    if not has_tp:
+        return False, "open_position() does not place TP order — exits not guaranteed if bot goes offline"
+    if not has_sl:
+        return False, "open_position() does not place SL order — stop losses not guaranteed if bot goes offline"
+    return True, "open_position() places both TP and SL orders immediately on every entry"
+
+
+def _check_hl_close_checks_position():
+    src = _read_file("hyperliquid/executor.py")
+    if not src:
+        return True, "hyperliquid/executor.py not found — HL bot not yet deployed"
+    fn = re.search(r'def close_position\((.+?)(?=\ndef |\Z)', src, re.DOTALL)
+    if not fn:
+        return False, "close_position() not found in hyperliquid/executor.py"
+    if "get_open_positions" not in fn.group(1):
+        return False, "close_position() doesn't verify position exists locally — could close positions bot didn't open"
+    return True, "close_position() verifies local position record before executing"
+
+
+def _check_hl_atomic_writes():
+    src = _read_file("hyperliquid/positions.py")
+    if not src:
+        return True, "hyperliquid/positions.py not found — HL bot not yet deployed"
+    if "POSITIONS_FILE" in src or "hl_positions.json" in src:
+        if "os.replace" not in src:
+            return False, "hyperliquid/positions.py does not use os.replace — hl_positions.json writes are non-atomic (corruption risk)"
+    return True, "hl_positions.json writes use atomic os.replace pattern"
+
+
+def _check_hl_risk_guards_called():
+    src = _read_file("hyperliquid/agent.py")
+    if not src:
+        return True, "hyperliquid/agent.py not found — HL bot not yet deployed"
+    auto_fn = re.search(r'def _auto_execute\((.+?)(?=\n    def |\Z)', src, re.DOTALL)
+    if not auto_fn:
+        return False, "_auto_execute not found in hyperliquid/agent.py"
+    if "can_open_trade" not in auto_fn.group(1):
+        return False, "_auto_execute does not call risk.can_open_trade — risk guards bypassed for auto-entries"
+    handle_fn = re.search(r'def _handle_tool\((.+?)(?=\n    def |\Z)', src, re.DOTALL)
+    if not handle_fn:
+        return False, "_handle_tool not found in hyperliquid/agent.py"
+    if "can_open_trade" not in handle_fn.group(1):
+        return False, "_handle_tool does not call risk.can_open_trade — Claude-initiated trades bypass risk guards"
+    return True, "risk.can_open_trade() called in both _auto_execute and _handle_tool"
+
+
+def _check_hl_reconcile_on_startup():
+    src = _read_file("hl_main.py")
+    if not src:
+        return True, "hl_main.py not found — HL bot not yet deployed"
+    fn = re.search(r'def main\((.+?)(?=\ndef |\Z)', src, re.DOTALL)
+    if not fn:
+        return False, "main() not found in hl_main.py"
+    body = fn.group(1)
+    reconcile_pos = body.find("reconcile_positions")
+    schedule_pos  = body.find("schedule")
+    if reconcile_pos < 0:
+        return False, "hl_main.py does not call reconcile_positions on startup — ghost positions not cleaned"
+    if schedule_pos >= 0 and reconcile_pos > schedule_pos:
+        return False, "reconcile_positions called after schedule loop — may not run before first tick"
+    return True, "reconcile_positions called on startup before agent loop"
+
+
 FAST_CHECKS = [
     ("API: all create() calls use SYSTEM_PROMPT_CACHED",       _check_system_prompt_cached),
     ("API: TOOLS list has cache_control",                      _check_tools_cache_control),
@@ -288,6 +415,16 @@ FAST_CHECKS = [
     ("Data: screener cache write guarded (no empty overwrite)",_check_screener_cache_guard),
     ("Risk: regime set before risk calls",                     _check_regime_before_risk),
     ("Ops: daily cost alert present",                          _check_cost_alert),
+    # HL bot checks
+    ("HL Config: HL_PRIVATE_KEY separate from PRIVATE_KEY",        _check_hl_private_key_separate),
+    ("HL API: agent uses SYSTEM_PROMPT_CACHED",                    _check_hl_system_prompt_cached),
+    ("HL API: TOOLS list has cache_control",                       _check_hl_tools_cache_control),
+    ("HL API: agentic loop uses model variable",                   _check_hl_no_hardcoded_model_in_loop),
+    ("HL Execution: TP and SL placed on every open_position()",    _check_hl_tp_sl_on_open),
+    ("HL Execution: close_position checks local records first",    _check_hl_close_checks_position),
+    ("HL Data: hl_positions.json writes are atomic",               _check_hl_atomic_writes),
+    ("HL Risk: can_open_trade() called before every trade",        _check_hl_risk_guards_called),
+    ("HL Startup: reconcile_positions called on startup",          _check_hl_reconcile_on_startup),
 ]
 
 
